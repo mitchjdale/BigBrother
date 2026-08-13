@@ -1,2 +1,2 @@
-# TE-18---BigBrother
+# TE-18 BigBrother
 Hackathon 2026 - Fernando
