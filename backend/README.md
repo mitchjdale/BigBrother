@@ -29,6 +29,14 @@ Cost is captured by matching the CLI session on its `cwd` (the unique clone dir)
 Copilot local session store, then summing `assistant_usage_events` (input/output tokens,
 `total_nano_aiu`). 1 AIU = 1e9 nano_aiu; set `USD_PER_AIU` for a dollar figure.
 
+Both phases are tracked separately (#18): planning cost comes from the local CLI session
+above, while implementation cost is captured best-effort from the cloud agent-task session
+(`captureUsageBySessionRef`, refreshed on `/plans/:id/refresh-execution`). The `/usage`
+report and the dedicated usage page split every total, time bucket and per-repo row into
+**planning** vs **implementation** so the two can be compared. Note: the implementation
+phase runs on the Copilot cloud coding agent (`gh agent-task`); its usage only appears if
+that session is recorded in the local session store, otherwise it reports as zero.
+
 ## Setup
 
 ```bash
@@ -80,7 +88,8 @@ are stripped before those subprocesses run.
 | POST | `/plans/:id/regenerate` | `{ feedback, model?: string\|null }` → revised plan (M3) |
 | PATCH | `/plans/:id/version` | `{ markdown }` → developer-edited version (M3) |
 | POST | `/plans/:id/execute` | approve (`{ model?: string|null }`) → Copilot cloud agent → draft PR (M4) |
-| POST | `/plans/:id/refresh-execution` | re-poll agent task for the draft PR / state (M4) |
+| POST | `/plans/:id/refresh-execution` | re-poll agent task for the draft PR / state; also re-captures implementation token usage (M4, #18) |
+| GET  | `/usage` | aggregated planning + implementation token/AIU usage split by phase, with time series + per-repo breakdown (optional `repoOwner`/`repoName`/`from`/`to`/`granularity`) (#18) |
 
 ## Not in this milestone
 - Playwright screenshot on the PR — **M5**
@@ -99,6 +108,7 @@ src/
   queue.ts     p-queue — enqueue on click, run plans concurrently
   copilot.ts   clone repo + run read-only Copilot CLI plan; capture markdown + cost
   usage.ts     cost adapter — sum a session's tokens/AIU from ~/.copilot/session-store.db
+               (by cwd for planning, by session ref for implementation #18)
   planner.ts   plan job orchestration, versions, edit, plan view (status + cost + PR)
   execute.ts   execute queue — gh agent-task, output parser, PR refresh
   server.ts    Express routes

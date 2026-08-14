@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Coins, Hash, Loader2, RefreshCw } from "lucide-react";
 
 type Metric = "tokens" | "aiu" | "usd";
+type Phase = "both" | "planning" | "implementation";
 type Preset = "7" | "30" | "90" | "all" | "custom";
 
 function isoDate(d: Date): string {
@@ -45,6 +46,12 @@ const PRESET_OPTIONS: { label: string; value: Preset }[] = [
   { label: "Custom", value: "custom" },
 ];
 
+const PHASE_BUTTONS: { label: string; value: Phase }[] = [
+  { label: "Both", value: "both" },
+  { label: "Planning", value: "planning" },
+  { label: "Implementation", value: "implementation" },
+];
+
 function fmtInt(n: number): string {
   return n.toLocaleString();
 }
@@ -57,6 +64,7 @@ export default function UsagePage() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [metric, setMetric] = useState<Metric>("tokens");
+  const [phase, setPhase] = useState<Phase>("both");
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,14 +128,34 @@ export default function UsagePage() {
     () =>
       (report?.series ?? []).map((b) => ({
         bucket: b.bucket,
+        // combined
         inputTokens: b.inputTokens,
         outputTokens: b.outputTokens,
         totalTokens: b.totalTokens,
         aiu: Number(b.aiu.toFixed(4)),
         usd: b.usd == null ? 0 : Number(b.usd.toFixed(4)),
+        // planning phase
+        planInput: b.planning.inputTokens,
+        planOutput: b.planning.outputTokens,
+        planTokens: b.planning.totalTokens,
+        planAiu: Number(b.planning.aiu.toFixed(4)),
+        planUsd: b.planning.usd == null ? 0 : Number(b.planning.usd.toFixed(4)),
+        // implementation phase
+        implInput: b.implementation.inputTokens,
+        implOutput: b.implementation.outputTokens,
+        implTokens: b.implementation.totalTokens,
+        implAiu: Number(b.implementation.aiu.toFixed(4)),
+        implUsd: b.implementation.usd == null ? 0 : Number(b.implementation.usd.toFixed(4)),
       })),
     [report],
   );
+
+  // Data key for a phase's single-value metric (aiu/usd, or total tokens).
+  const phaseKey = (p: "plan" | "impl", m: Metric): string => {
+    if (m === "tokens") return p === "plan" ? "planTokens" : "implTokens";
+    if (m === "aiu") return p === "plan" ? "planAiu" : "implAiu";
+    return p === "plan" ? "planUsd" : "implUsd";
+  };
 
   const metricButtons: { label: string; value: Metric; disabled?: boolean }[] = [
     { label: "Tokens", value: "tokens" },
@@ -143,7 +171,8 @@ export default function UsagePage() {
         <div>
           <h2 className="text-lg font-semibold">Token usage</h2>
           <p className="text-sm text-muted-foreground">
-            Planning cost across all plans. Execution (cloud agent) usage isn't captured yet.
+            Planning and implementation cost across all plans — tracked separately so you
+            can compare the two phases.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -230,41 +259,62 @@ export default function UsagePage() {
             sub={s ? `${fmtInt(s.inputTokens)} in / ${fmtInt(s.outputTokens)} out` : undefined}
           />
           <SummaryCard
+            title="Planning tokens"
+            icon={<Hash className="h-4 w-4" />}
+            value={s ? fmtInt(s.planning.totalTokens) : "—"}
+            sub={s ? `${s.planning.aiu.toFixed(2)} AIU · ${fmtInt(s.planning.attempts)} run(s)` : undefined}
+          />
+          <SummaryCard
+            title="Implementation tokens"
+            icon={<Hash className="h-4 w-4" />}
+            value={s ? fmtInt(s.implementation.totalTokens) : "—"}
+            sub={
+              s ? `${s.implementation.aiu.toFixed(2)} AIU · ${fmtInt(s.implementation.attempts)} run(s)` : undefined
+            }
+          />
+          <SummaryCard
             title="Total AIU"
             icon={<Coins className="h-4 w-4" />}
             value={s ? s.aiu.toFixed(2) : "—"}
-            sub={s && usdAvailable && s.usd != null ? `$${s.usd.toFixed(3)}` : undefined}
-          />
-          <SummaryCard
-            title="Plans"
-            value={s ? fmtInt(s.plans) : "—"}
-            sub={s ? `${fmtInt(s.attempts)} attempt(s)` : undefined}
-          />
-          <SummaryCard
-            title="Failed attempts"
-            value={s ? fmtInt(s.failedAttempts) : "—"}
-            sub={s ? `${fmtInt(s.repos)} repo(s)` : undefined}
+            sub={s && usdAvailable && s.usd != null ? `$${s.usd.toFixed(3)}` : s ? `${fmtInt(s.plans)} plan(s)` : undefined}
           />
         </div>
 
         <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base">Usage over time</CardTitle>
-            <div className="flex overflow-hidden rounded-md border">
-              {metricButtons.map((m) => (
-                <button
-                  key={m.value}
-                  disabled={m.disabled}
-                  onClick={() => setMetric(m.value)}
-                  className={`px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                    metric === m.value
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-background hover:bg-accent"
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex overflow-hidden rounded-md border">
+                {PHASE_BUTTONS.map((p) => (
+                  <button
+                    key={p.value}
+                    onClick={() => setPhase(p.value)}
+                    className={`px-3 py-1 text-xs transition-colors ${
+                      phase === p.value
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-background hover:bg-accent"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex overflow-hidden rounded-md border">
+                {metricButtons.map((m) => (
+                  <button
+                    key={m.value}
+                    disabled={m.disabled}
+                    onClick={() => setMetric(m.value)}
+                    className={`px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                      metric === m.value
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-background hover:bg-accent"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -288,16 +338,41 @@ export default function UsagePage() {
                       return metric === "tokens" ? fmtInt(n) : n;
                     }}
                   />
-                  {metric === "tokens" ? (
+                  <Legend />
+                  {phase === "both" ? (
                     <>
-                      <Legend />
-                      <Bar dataKey="inputTokens" name="Input" stackId="t" fill="#6366f1" />
-                      <Bar dataKey="outputTokens" name="Output" stackId="t" fill="#22c55e" />
+                      <Bar
+                        dataKey={phaseKey("plan", metric)}
+                        name="Planning"
+                        fill="#6366f1"
+                      />
+                      <Bar
+                        dataKey={phaseKey("impl", metric)}
+                        name="Implementation"
+                        fill="#f59e0b"
+                      />
                     </>
-                  ) : metric === "aiu" ? (
-                    <Bar dataKey="aiu" name="AIU" fill="#f59e0b" />
+                  ) : metric === "tokens" ? (
+                    <>
+                      <Bar
+                        dataKey={phase === "planning" ? "planInput" : "implInput"}
+                        name="Input"
+                        stackId="t"
+                        fill="#6366f1"
+                      />
+                      <Bar
+                        dataKey={phase === "planning" ? "planOutput" : "implOutput"}
+                        name="Output"
+                        stackId="t"
+                        fill="#22c55e"
+                      />
+                    </>
                   ) : (
-                    <Bar dataKey="usd" name="USD" fill="#10b981" />
+                    <Bar
+                      dataKey={phaseKey(phase === "planning" ? "plan" : "impl", metric)}
+                      name={metric === "aiu" ? "AIU" : "USD"}
+                      fill={metric === "aiu" ? "#f59e0b" : "#10b981"}
+                    />
                   )}
                 </BarChart>
               </ResponsiveContainer>
@@ -316,12 +391,12 @@ export default function UsagePage() {
                   <thead>
                     <tr className="border-b text-left text-xs text-muted-foreground">
                       <th className="py-2 pr-4 font-medium">Repository</th>
-                      <th className="py-2 pr-4 text-right font-medium">Input</th>
-                      <th className="py-2 pr-4 text-right font-medium">Output</th>
-                      <th className="py-2 pr-4 text-right font-medium">Total</th>
+                      <th className="py-2 pr-4 text-right font-medium">Planning</th>
+                      <th className="py-2 pr-4 text-right font-medium">Implementation</th>
+                      <th className="py-2 pr-4 text-right font-medium">Total tokens</th>
                       <th className="py-2 pr-4 text-right font-medium">AIU</th>
                       {usdAvailable && <th className="py-2 pr-4 text-right font-medium">USD</th>}
-                      <th className="py-2 text-right font-medium">Attempts</th>
+                      <th className="py-2 text-right font-medium">Runs</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -330,8 +405,10 @@ export default function UsagePage() {
                         <td className="py-2 pr-4">
                           {r.owner}/{r.name}
                         </td>
-                        <td className="py-2 pr-4 text-right">{fmtInt(r.inputTokens)}</td>
-                        <td className="py-2 pr-4 text-right">{fmtInt(r.outputTokens)}</td>
+                        <td className="py-2 pr-4 text-right">{fmtInt(r.planning.totalTokens)}</td>
+                        <td className="py-2 pr-4 text-right">
+                          {fmtInt(r.implementation.totalTokens)}
+                        </td>
                         <td className="py-2 pr-4 text-right">{fmtInt(r.totalTokens)}</td>
                         <td className="py-2 pr-4 text-right">{r.aiu.toFixed(2)}</td>
                         {usdAvailable && (
