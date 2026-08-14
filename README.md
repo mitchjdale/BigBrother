@@ -2,6 +2,10 @@
 
 > Hackathon 2026 · Team TE-18 (Fernando)
 
+<p align="center">
+  <img src="BigBrother.png" alt="BigBrother" width="480" />
+</p>
+
 **BigBrother is an AI implementation-planning dashboard for developer tickets.**
 Browse a repository's GitHub issues, press **Create plan**, and GitHub Copilot examines
 the actual codebase and produces an implementation plan — asynchronously, with the
