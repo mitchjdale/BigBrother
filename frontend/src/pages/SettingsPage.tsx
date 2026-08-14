@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
+  type IssueSource,
   type JiraProject,
   type JiraProjectMapping,
   type RepoRef,
@@ -12,7 +13,12 @@ import { Loader2, Plus, RefreshCw, Trash2, Link2 } from "lucide-react";
 const selectClass =
   "h-9 rounded-md border bg-background px-2 text-sm text-foreground disabled:opacity-50";
 
-export default function SettingsPage() {
+interface Props {
+  source: IssueSource;
+  setSource: (source: IssueSource) => void;
+}
+
+export default function SettingsPage({ source, setSource }: Props) {
   const [jiraConfigured, setJiraConfigured] = useState<boolean | null>(null);
   const [projects, setProjects] = useState<JiraProject[]>([]);
   const [repos, setRepos] = useState<RepoRef[]>([]);
@@ -97,7 +103,7 @@ export default function SettingsPage() {
         <div>
           <h2 className="text-lg font-semibold">Settings</h2>
           <p className="text-sm text-muted-foreground">
-            Map JIRA projects to GitHub repositories so tickets can be planned and executed.
+            Choose the issue source and, for JIRA, map projects to GitHub repositories.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={load}>
@@ -114,33 +120,62 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2 text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
-        ) : jiraConfigured === false ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">JIRA is not configured</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-muted-foreground">
-              <p>
-                Set <code>JIRA_BASE_URL</code>, <code>JIRA_EMAIL</code> and{" "}
-                <code>JIRA_API_TOKEN</code> in <code>backend/.env</code> and restart the backend to
-                enable JIRA as an issue source.
-              </p>
-              <p>
-                Create an API token at{" "}
-                <a
-                  className="text-primary hover:underline"
-                  href="https://id.atlassian.com/manage-profile/security/api-tokens"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  id.atlassian.com
-                </a>
-                .
-              </p>
-            </CardContent>
-          </Card>
         ) : (
           <>
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Issue source</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <label className="grid max-w-xs gap-1 text-xs text-muted-foreground">
+                  Pull issues from
+                  <select
+                    className={selectClass}
+                    value={source}
+                    onChange={(e) => setSource(e.target.value as IssueSource)}
+                  >
+                    <option value="github">GitHub Issues</option>
+                    <option value="jira" disabled={!jiraConfigured}>
+                      JIRA{jiraConfigured ? "" : " (not configured)"}
+                    </option>
+                  </select>
+                </label>
+                <p className="text-sm text-muted-foreground">
+                  {source === "github"
+                    ? "GitHub Issues selected — no further configuration needed. Choose the repository on the Dashboard."
+                    : "JIRA selected — map each JIRA project to the GitHub repository that will be cloned for planning and receive the draft PR."}
+                </p>
+              </CardContent>
+            </Card>
+
+            {source === "jira" &&
+              (jiraConfigured === false ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">JIRA is not configured</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm text-muted-foreground">
+                    <p>
+                      Set <code>JIRA_BASE_URL</code>, <code>JIRA_EMAIL</code> and{" "}
+                      <code>JIRA_API_TOKEN</code> in <code>backend/.env</code> and restart the backend
+                      to enable JIRA as an issue source.
+                    </p>
+                    <p>
+                      Create an API token at{" "}
+                      <a
+                        className="text-primary hover:underline"
+                        href="https://id.atlassian.com/manage-profile/security/api-tokens"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        id.atlassian.com
+                      </a>
+                      .
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Add a project → repository mapping</CardTitle>
@@ -236,6 +271,8 @@ export default function SettingsPage() {
                 )}
               </CardContent>
             </Card>
+                </>
+              ))}
           </>
         )}
       </div>

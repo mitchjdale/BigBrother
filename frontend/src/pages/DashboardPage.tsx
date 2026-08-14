@@ -39,8 +39,12 @@ function contextKey(ctx: IssueContext): string {
   return ctx.source === "github" ? `gh:${ctx.repo.owner}/${ctx.repo.name}` : `jira:${ctx.project}`;
 }
 
-export default function DashboardPage() {
-  const [source, setSource] = usePersistentState<IssueSource>("bb.dashboard.source", "github");
+interface Props {
+  source: IssueSource;
+  setSource: (source: IssueSource) => void;
+}
+
+export default function DashboardPage({ source, setSource }: Props) {
   const [jiraAvailable, setJiraAvailable] = useState(false);
 
   const [repoOptions, setRepoOptions] = useState<RepoRef[]>(
@@ -296,20 +300,6 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-end gap-3">
-          <label className="grid gap-1 text-xs text-muted-foreground">
-            Source
-            <select
-              className={selectClass}
-              value={source}
-              onChange={(e) => setSource(e.target.value as IssueSource)}
-            >
-              <option value="github">GitHub Issues</option>
-              <option value="jira" disabled={!jiraAvailable}>
-                JIRA{jiraAvailable ? "" : " (not configured)"}
-              </option>
-            </select>
-          </label>
-
           {source === "github" ? (
             <>
               <label className="grid gap-1 text-xs text-muted-foreground">
