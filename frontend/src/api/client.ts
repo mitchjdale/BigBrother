@@ -7,6 +7,12 @@ export interface Issue {
   labels: string[];
 }
 
+export interface RepoRef {
+  owner: string;
+  name: string;
+  base: string;
+}
+
 export interface Cost {
   inputTokens: number;
   outputTokens: number;
@@ -58,6 +64,15 @@ export interface PlanView {
 
 const BASE = "/api";
 
+function repoQuery(repo: RepoRef): string {
+  const params = new URLSearchParams({
+    repoOwner: repo.owner,
+    repoName: repo.name,
+    repoBase: repo.base,
+  });
+  return `?${params.toString()}`;
+}
+
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -67,22 +82,32 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const api = {
-  listIssues: () => fetch(`${BASE}/repos/issues`).then(json<Issue[]>),
+  listRepos: () =>
+    fetch(`${BASE}/repos`).then(json<{ defaultRepo: RepoRef; repos: RepoRef[] }>),
 
-  listPlans: () =>
-    fetch(`${BASE}/plans`).then(json<{ issueNumber: number; planId: number; status: PlanStatus }[]>),
+  listIssues: (repo: RepoRef) => fetch(`${BASE}/repos/issues${repoQuery(repo)}`).then(json<Issue[]>),
 
-  getIssuePlan: (issueNumber: number) =>
-    fetch(`${BASE}/issues/${issueNumber}/plan`).then(async (r) => {
+  listPlans: (repo: RepoRef) =>
+    fetch(`${BASE}/plans${repoQuery(repo)}`).then(
+      json<{ issueNumber: number; planId: number; status: PlanStatus }[]>,
+    ),
+
+  getIssuePlan: (issueNumber: number, repo: RepoRef) =>
+    fetch(`${BASE}/issues/${issueNumber}/plan${repoQuery(repo)}`).then(async (r) => {
       if (r.status === 404) return null;
       return json<PlanView>(r);
     }),
 
-  createPlan: (issueNumber: number, model: string | null = null) =>
+  createPlan: (issueNumber: number, repo: RepoRef, model: string | null = null) =>
     fetch(`${BASE}/issues/${issueNumber}/plan`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model }),
+      body: JSON.stringify({
+        model,
+        repoOwner: repo.owner,
+        repoName: repo.name,
+        repoBase: repo.base,
+      }),
     }).then(
       json<{ planId: number; status: PlanStatus }>,
     ),

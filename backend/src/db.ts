@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS plans (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   repo_owner TEXT NOT NULL,
   repo_name TEXT NOT NULL,
+  repo_base TEXT NOT NULL,
   issue_number INTEGER NOT NULL,
   issue_title TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'idle',
@@ -63,6 +64,12 @@ CREATE TABLE IF NOT EXISTS prs (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+
+const planColumns = db.prepare(`PRAGMA table_info(plans)`).all() as { name: string }[];
+if (!planColumns.some((c) => c.name === "repo_base")) {
+  db.exec(`ALTER TABLE plans ADD COLUMN repo_base TEXT`);
+  db.prepare(`UPDATE plans SET repo_base = ? WHERE repo_base IS NULL OR repo_base = ''`).run(config.repo.base);
+}
 
 export function now(): string {
   return new Date().toISOString();

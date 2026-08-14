@@ -89,8 +89,10 @@ Multiple tickets can be planned concurrently.
 
 ## Configuration
 
-The target repository and cost rate are configured in `backend/.env`
+Set default repository + cost settings in `backend/.env`
 (`REPO_OWNER`, `REPO_NAME`, `REPO_BASE`, `USD_PER_AIU`, `PLAN_CONCURRENCY`, …).
+The dashboard now lets you pick owner/repository from dropdowns at runtime, and each
+plan/execution uses the selected repo.
 See `backend/README.md` for the full list.
 
 ## Status & roadmap

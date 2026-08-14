@@ -1,7 +1,7 @@
 import express from "express";
 import { config } from "./config.js";
 import { db } from "./db.js";
-import { listIssues, getIssue } from "./github.js";
+import { getIssue, listIssues, listSelectableRepos } from "./github.js";
 import {
   createPlanRecord,
   schedulePlanJob,
@@ -12,6 +12,7 @@ import {
   listLatestPlansByIssue,
 } from "./planner.js";
 import { scheduleExecuteJob, refreshExecution } from "./execute.js";
+import type { RepoRef } from "./types.js";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -26,29 +27,84 @@ function parseModel(body: unknown): { model: string | null | undefined; error: s
   return { model: trimmed || null, error: null };
 }
 
+function validRepoPart(v: string): boolean {
+  return /^[A-Za-z0-9_.-]+$/.test(v);
+}
+
+function validBranch(v: string): boolean {
+  return !/\s/.test(v);
+}
+
+function parseRepo(
+  source: Record<string, unknown> | undefined,
+): { repo: RepoRef; error: string | null } {
+  const ownerRaw = typeof source?.repoOwner === "string" ? source.repoOwner.trim() : config.repo.owner;
+  const nameRaw = typeof source?.repoName === "string" ? source.repoName.trim() : config.repo.name;
+  const baseRaw = typeof source?.repoBase === "string" ? source.repoBase.trim() : config.repo.base;
+
+  if (!ownerRaw || !validRepoPart(ownerRaw)) {
+    return { repo: { ...config.repo }, error: "repoOwner is invalid" };
+  }
+  if (!nameRaw || !validRepoPart(nameRaw)) {
+    return { repo: { ...config.repo }, error: "repoName is invalid" };
+  }
+  if (!baseRaw || !validBranch(baseRaw)) {
+    return { repo: { ...config.repo }, error: "repoBase is invalid" };
+  }
+
+  return { repo: { owner: ownerRaw, name: nameRaw, base: baseRaw }, error: null };
+}
+
+function queryToRecord(query: Record<string, unknown>): Record<string, unknown> {
+  return {
+    repoOwner: query.repoOwner,
+    repoName: query.repoName,
+    repoBase: query.repoBase,
+  };
+}
+
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, repo: `${config.repo.owner}/${config.repo.name}`, hasToken: !!config.ghToken });
+  res.json({
+    ok: true,
+    defaultRepo: `${config.repo.owner}/${config.repo.name}`,
+    hasToken: !!config.ghToken,
+  });
 });
 
-// --- M1: list issues for the configured repo ---
-app.get("/repos/issues", async (_req, res) => {
+app.get("/repos", async (_req, res) => {
   try {
-    res.json(await listIssues());
+    const repos = await listSelectableRepos();
+    res.json({ defaultRepo: { ...config.repo }, repos });
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// --- M1: list issues for the selected repo ---
+app.get("/repos/issues", async (req, res) => {
+  const parsedRepo = parseRepo(queryToRecord(req.query as Record<string, unknown>));
+  if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
+  try {
+    res.json(await listIssues(parsedRepo.repo));
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 
 // --- Hydration: latest plan per issue, so the UI can restore state after a reload ---
-app.get("/plans", (_req, res) => {
-  res.json(listLatestPlansByIssue());
+app.get("/plans", (req, res) => {
+  const parsedRepo = parseRepo(queryToRecord(req.query as Record<string, unknown>));
+  if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
+  res.json(listLatestPlansByIssue(parsedRepo.repo));
 });
 
 // --- Fetch the latest persisted plan for a given issue ---
 app.get("/issues/:number/plan", (req, res) => {
   const issueNumber = Number(req.params.number);
   if (!Number.isInteger(issueNumber)) return res.status(400).json({ error: "invalid issue number" });
-  const planId = getLatestPlanIdForIssue(issueNumber);
+  const parsedRepo = parseRepo(queryToRecord(req.query as Record<string, unknown>));
+  if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
+  const planId = getLatestPlanIdForIssue(issueNumber, parsedRepo.repo);
   if (planId == null) return res.status(404).json({ error: "no plan for issue" });
   const view = getPlanView(planId);
   if (!view) return res.status(404).json({ error: "no plan for issue" });
@@ -61,11 +117,13 @@ app.post("/issues/:number/plan", async (req, res) => {
   if (!Number.isInteger(issueNumber)) return res.status(400).json({ error: "invalid issue number" });
   const parsedModel = parseModel(req.body);
   if (parsedModel.error) return res.status(400).json({ error: parsedModel.error });
+  const parsedRepo = parseRepo((req.body ?? {}) as Record<string, unknown>);
+  if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
 
   try {
-    const issue = await getIssue(issueNumber);
-    const planId = createPlanRecord(issue.number, issue.title);
-    schedulePlanJob(planId, issue.number, { model: parsedModel.model });
+    const issue = await getIssue(issueNumber, parsedRepo.repo);
+    const planId = createPlanRecord(issue.number, issue.title, parsedRepo.repo);
+    schedulePlanJob(planId, { model: parsedModel.model });
     res.status(202).json({ planId, status: "planning" });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
@@ -85,7 +143,7 @@ app.post("/plans/:id/regenerate", (req, res) => {
     | undefined;
   if (!plan) return res.status(404).json({ error: "plan not found" });
 
-  schedulePlanJob(planId, plan.issue_number, { feedback, model: parsedModel.model });
+  schedulePlanJob(planId, { feedback, model: parsedModel.model });
   res.status(202).json({ planId, status: "planning" });
 });
 

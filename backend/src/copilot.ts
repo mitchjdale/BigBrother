@@ -4,7 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { config } from "./config.js";
 import { cloneUrl, copilotEnv } from "./auth.js";
-import type { Issue, Usage } from "./types.js";
+import type { Issue, RepoRef, Usage } from "./types.js";
 import { captureUsageByCwd } from "./usage.js";
 
 const run = promisify(execFile);
@@ -55,6 +55,7 @@ export interface PlanResult {
  */
 export async function generatePlan(
   issue: Issue,
+  repo: RepoRef,
   opts: { feedback?: string; previousPlan?: string; model?: string | null } = {},
 ): Promise<PlanResult> {
   fs.mkdirSync(config.workDir, { recursive: true });
@@ -65,9 +66,9 @@ export async function generatePlan(
   const startedAt = new Date().toISOString();
 
   try {
-    const url = cloneUrl(config.repo.owner, config.repo.name);
+    const url = cloneUrl(repo.owner, repo.name);
 
-    await run("git", ["clone", "--depth", "1", "--branch", config.repo.base, url, cwd], {
+    await run("git", ["clone", "--depth", "1", "--branch", repo.base, url, cwd], {
       maxBuffer: 64 * 1024 * 1024,
     });
 
