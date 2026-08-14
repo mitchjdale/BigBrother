@@ -96,6 +96,16 @@ export default function DashboardPage() {
     pollers.current = {};
   }, []);
 
+  const loadMappings = useCallback(async () => {
+    try {
+      const maps = await api.listMappings();
+      setMappings(maps);
+      writeCache("bb.cache.mappings", maps);
+    } catch {
+      /* backend unavailable — keep cached mappings */
+    }
+  }, []);
+
   const loadIssues = useCallback(async () => {
     if (!ctx || !ctxId) {
       setIssues([]);
@@ -161,10 +171,7 @@ export default function DashboardPage() {
           setSelectedRepoName(payload.defaultRepo.name);
         }
         if (sources.jira) {
-          const maps = await api.listMappings().catch(() => [] as JiraProjectMapping[]);
-          if (!active) return;
-          setMappings(maps);
-          writeCache("bb.cache.mappings", maps);
+          await loadMappings();
         }
       } catch (e) {
         if (!active) return;
@@ -183,6 +190,16 @@ export default function DashboardPage() {
   useEffect(() => {
     if (source === "jira" && !jiraAvailable && !loadingRepos) setSource("github");
   }, [source, jiraAvailable, loadingRepos, setSource]);
+
+  // Keep JIRA mappings fresh: refetch when JIRA is selected (they may have been
+  // added on the Settings page after this page first loaded) and on window focus.
+  useEffect(() => {
+    if (source !== "jira" || !jiraAvailable) return;
+    loadMappings();
+    const onFocus = () => loadMappings();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [source, jiraAvailable, loadMappings]);
 
   // Keep the GitHub repo selection valid for the chosen owner.
   useEffect(() => {
@@ -373,7 +390,14 @@ export default function DashboardPage() {
               ))}
             </select>
           </label>
-          <Button variant="outline" size="sm" onClick={loadIssues}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (source === "jira") loadMappings();
+              loadIssues();
+            }}
+          >
             <RefreshCw className="h-4 w-4" /> Refresh issues
           </Button>
         </div>
