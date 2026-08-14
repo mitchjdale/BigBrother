@@ -37,6 +37,13 @@ report and the dedicated usage page split every total, time bucket and per-repo 
 phase runs on the Copilot cloud coding agent (`gh agent-task`); its usage only appears if
 that session is recorded in the local session store, otherwise it reports as zero.
 
+Cost is also translated to a rough **dollar estimate** (#19). `pricing.ts` holds an
+approximate USD-per-1M-token price list keyed by model (overridable via `MODEL_PRICING`),
+so `estimatedUsd = input×rate_in + output×rate_out` per attempt. Estimates are summed
+(model-aware) into the plan view (`totalCost.estimatedUsd`), the `/usage` report, and a
+per-issue total surfaced by `/plans` — the dashboard shows that as a small cost badge on
+each ticket. These figures are deliberately rough ball-parks for comparison, not billing.
+
 ## Setup
 
 ```bash
@@ -80,7 +87,7 @@ are stripped before those subprocesses run.
 | GET  | `/health` | sanity + token check |
 | GET  | `/repos` | list selectable repositories (owner/name/base) for the UI dropdowns |
 | GET  | `/repos/issues` | list open issues for the selected repo (M1) |
-| GET  | `/plans` | latest plan per issue (dashboard hydration after reload) |
+| GET  | `/plans` | latest plan per issue + per-issue `estimatedUsd` for the ticket cost badge (dashboard hydration) (#19) |
 | GET  | `/issues/:number/plan` | latest persisted plan for an issue (404 if none) |
 | POST | `/issues/:number/plan` | enqueue a plan (`{ model?: string\|null }`) → `{ planId }` (202). Reuses the issue's existing plan record so token usage accumulates (#11) |
 | POST | `/plans/:id/retry` | re-run a failed/completed plan in-place (`{ model?: string\|null }`), retaining prior token usage (#11) |
@@ -109,6 +116,7 @@ src/
   copilot.ts   clone repo + run read-only Copilot CLI plan; capture markdown + cost
   usage.ts     cost adapter — sum a session's tokens/AIU from ~/.copilot/session-store.db
                (by cwd for planning, by session ref for implementation #18)
+  pricing.ts   rough per-model USD price list + token→dollar estimate helpers (#19)
   planner.ts   plan job orchestration, versions, edit, plan view (status + cost + PR)
   execute.ts   execute queue — gh agent-task, output parser, PR refresh
   server.ts    Express routes
@@ -138,6 +146,7 @@ src/
 | `EXECUTE_MODEL` | *(auto)* | pin a Copilot model for execution |
 | `COPILOT_SESSION_STORE` | `~/.copilot/session-store.db` | CLI usage store for cost capture |
 | `USD_PER_AIU` | `0` | USD per AI Unit for a dollar figure (0 = report AIU/tokens only) |
+| `MODEL_PRICING` | *(built-in)* | JSON overriding the rough per-model USD/1M-token rates used for cost estimates (#19) |
 | `SQLITE_PATH` | `./data/bigbrother.db` | app database file |
 | `LOG_LEVEL` | `info` | pino level: `trace`/`debug`/`info`/`warn`/`error`/`fatal`/`silent` |
 | `LOG_PRETTY` | *(auto)* | `false` forces JSON logs in dev; JSON is always used when `NODE_ENV=production` |

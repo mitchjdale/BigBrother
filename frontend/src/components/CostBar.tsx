@@ -5,6 +5,7 @@ interface Props {
   total: {
     aiu: number;
     usd: number | null;
+    estimatedUsd?: number;
     inputTokens: number;
     outputTokens: number;
     versions: number;
@@ -20,7 +21,16 @@ export function CostBar({ total, current }: Props) {
       <span className="inline-flex items-center gap-1 font-medium">
         <Coins className="h-3.5 w-3.5" />
         {total.aiu.toFixed(2)} AIU
-        {total.usd != null && <span className="text-muted-foreground">(${total.usd.toFixed(3)})</span>}
+        {total.usd != null ? (
+          <span className="text-muted-foreground">(${total.usd.toFixed(3)})</span>
+        ) : (
+          total.estimatedUsd != null &&
+          total.estimatedUsd > 0 && (
+            <span className="text-muted-foreground" title="Rough model-based estimate">
+              (~${total.estimatedUsd.toFixed(3)})
+            </span>
+          )
+        )}
       </span>
       <span className="inline-flex items-center gap-1 text-muted-foreground">
         <Hash className="h-3.5 w-3.5" />

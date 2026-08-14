@@ -1,5 +1,6 @@
 import { db } from "./db.js";
 import { config } from "./config.js";
+import { sqlEstimatedUsd } from "./pricing.js";
 
 export type Granularity = "day" | "week";
 
@@ -18,6 +19,7 @@ export interface PhaseTotals {
   totalTokens: number;
   aiu: number;
   usd: number | null;
+  estimatedUsd: number;
   attempts: number;
   failedAttempts: number;
 }
@@ -29,6 +31,7 @@ export interface UsageBucket {
   totalTokens: number;
   aiu: number;
   usd: number | null;
+  estimatedUsd: number;
   attempts: number;
   planning: PhaseTotals;
   implementation: PhaseTotals;
@@ -42,6 +45,7 @@ export interface RepoUsage {
   totalTokens: number;
   aiu: number;
   usd: number | null;
+  estimatedUsd: number;
   attempts: number;
   planning: PhaseTotals;
   implementation: PhaseTotals;
@@ -58,6 +62,7 @@ export interface UsageReport {
     totalTokens: number;
     aiu: number;
     usd: number | null;
+    estimatedUsd: number;
     attempts: number;
     failedAttempts: number;
     plans: number;
@@ -82,12 +87,16 @@ interface PhaseSums {
   plan_nano: number;
   plan_attempts: number;
   plan_failed: number;
+  plan_est_usd: number;
   exec_input: number;
   exec_output: number;
   exec_nano: number;
   exec_attempts: number;
   exec_failed: number;
+  exec_est_usd: number;
 }
+
+const EST_USD = sqlEstimatedUsd("j.input_tokens", "j.output_tokens", "j.model");
 
 /**
  * SQL fragment that splits token/AIU/attempt sums by job type so a single scan
@@ -99,11 +108,13 @@ const PHASE_SUMS = `
   COALESCE(SUM(CASE WHEN j.type='plan' THEN j.nano_aiu END),0)                 AS plan_nano,
   COALESCE(SUM(CASE WHEN j.type='plan' THEN 1 END),0)                          AS plan_attempts,
   COALESCE(SUM(CASE WHEN j.type='plan' AND j.status='failed' THEN 1 END),0)    AS plan_failed,
+  COALESCE(SUM(CASE WHEN j.type='plan' THEN ${EST_USD} END),0)                 AS plan_est_usd,
   COALESCE(SUM(CASE WHEN j.type='execute' THEN j.input_tokens END),0)          AS exec_input,
   COALESCE(SUM(CASE WHEN j.type='execute' THEN j.output_tokens END),0)         AS exec_output,
   COALESCE(SUM(CASE WHEN j.type='execute' THEN j.nano_aiu END),0)              AS exec_nano,
   COALESCE(SUM(CASE WHEN j.type='execute' THEN 1 END),0)                       AS exec_attempts,
-  COALESCE(SUM(CASE WHEN j.type='execute' AND j.status='failed' THEN 1 END),0) AS exec_failed`;
+  COALESCE(SUM(CASE WHEN j.type='execute' AND j.status='failed' THEN 1 END),0) AS exec_failed,
+  COALESCE(SUM(CASE WHEN j.type='execute' THEN ${EST_USD} END),0)              AS exec_est_usd`;
 
 function phaseTotals(
   input: number,
@@ -111,6 +122,7 @@ function phaseTotals(
   nano: number,
   attempts: number,
   failed: number,
+  estimatedUsd: number,
 ): PhaseTotals {
   const aiu = nano / 1e9;
   return {
@@ -119,17 +131,32 @@ function phaseTotals(
     totalTokens: input + output,
     aiu,
     usd: usd(aiu),
+    estimatedUsd,
     attempts,
     failedAttempts: failed,
   };
 }
 
 function planningOf(r: PhaseSums): PhaseTotals {
-  return phaseTotals(r.plan_input, r.plan_output, r.plan_nano, r.plan_attempts, r.plan_failed);
+  return phaseTotals(
+    r.plan_input,
+    r.plan_output,
+    r.plan_nano,
+    r.plan_attempts,
+    r.plan_failed,
+    r.plan_est_usd,
+  );
 }
 
 function implementationOf(r: PhaseSums): PhaseTotals {
-  return phaseTotals(r.exec_input, r.exec_output, r.exec_nano, r.exec_attempts, r.exec_failed);
+  return phaseTotals(
+    r.exec_input,
+    r.exec_output,
+    r.exec_nano,
+    r.exec_attempts,
+    r.exec_failed,
+    r.exec_est_usd,
+  );
 }
 
 /** Combined (planning + implementation) headline numbers for a row. */
@@ -141,6 +168,7 @@ function combined(p: PhaseTotals, i: PhaseTotals) {
     totalTokens: p.totalTokens + i.totalTokens,
     aiu,
     usd: usd(aiu),
+    estimatedUsd: p.estimatedUsd + i.estimatedUsd,
     attempts: p.attempts + i.attempts,
   };
 }

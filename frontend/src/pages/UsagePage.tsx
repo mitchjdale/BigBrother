@@ -131,12 +131,7 @@ export default function UsagePage() {
     load();
   }, [load]);
 
-  const usdAvailable = (report?.usdPerAiu ?? 0) > 0;
-
-  useEffect(() => {
-    if (metric === "usd" && report && !usdAvailable) setMetric("tokens");
-  }, [metric, report, usdAvailable, setMetric]);
-
+  // Estimated USD is model-based and always present, so USD is always available.
   const chartData = useMemo(
     () =>
       (report?.series ?? []).map((b) => ({
@@ -146,19 +141,19 @@ export default function UsagePage() {
         outputTokens: b.outputTokens,
         totalTokens: b.totalTokens,
         aiu: Number(b.aiu.toFixed(4)),
-        usd: b.usd == null ? 0 : Number(b.usd.toFixed(4)),
+        usd: Number(b.estimatedUsd.toFixed(4)),
         // planning phase
         planInput: b.planning.inputTokens,
         planOutput: b.planning.outputTokens,
         planTokens: b.planning.totalTokens,
         planAiu: Number(b.planning.aiu.toFixed(4)),
-        planUsd: b.planning.usd == null ? 0 : Number(b.planning.usd.toFixed(4)),
+        planUsd: Number(b.planning.estimatedUsd.toFixed(4)),
         // implementation phase
         implInput: b.implementation.inputTokens,
         implOutput: b.implementation.outputTokens,
         implTokens: b.implementation.totalTokens,
         implAiu: Number(b.implementation.aiu.toFixed(4)),
-        implUsd: b.implementation.usd == null ? 0 : Number(b.implementation.usd.toFixed(4)),
+        implUsd: Number(b.implementation.estimatedUsd.toFixed(4)),
       })),
     [report],
   );
@@ -173,7 +168,7 @@ export default function UsagePage() {
   const metricButtons: { label: string; value: Metric; disabled?: boolean }[] = [
     { label: "Tokens", value: "tokens" },
     { label: "AIU", value: "aiu" },
-    { label: "USD", value: "usd", disabled: !usdAvailable },
+    { label: "USD (est.)", value: "usd" },
   ];
 
   const s = report?.summary;
@@ -286,10 +281,14 @@ export default function UsagePage() {
             }
           />
           <SummaryCard
-            title="Total AIU"
+            title="Estimated cost"
             icon={<Coins className="h-4 w-4" />}
-            value={s ? s.aiu.toFixed(2) : "—"}
-            sub={s && usdAvailable && s.usd != null ? `$${s.usd.toFixed(3)}` : s ? `${fmtInt(s.plans)} plan(s)` : undefined}
+            value={s ? `~$${s.estimatedUsd.toFixed(2)}` : "—"}
+            sub={
+              s
+                ? `${s.aiu.toFixed(2)} AIU · plan ~$${s.planning.estimatedUsd.toFixed(2)} / impl ~$${s.implementation.estimatedUsd.toFixed(2)}`
+                : undefined
+            }
           />
         </div>
 
@@ -408,7 +407,7 @@ export default function UsagePage() {
                       <th className="py-2 pr-4 text-right font-medium">Implementation</th>
                       <th className="py-2 pr-4 text-right font-medium">Total tokens</th>
                       <th className="py-2 pr-4 text-right font-medium">AIU</th>
-                      {usdAvailable && <th className="py-2 pr-4 text-right font-medium">USD</th>}
+                      <th className="py-2 pr-4 text-right font-medium">Est. cost</th>
                       <th className="py-2 text-right font-medium">Runs</th>
                     </tr>
                   </thead>
@@ -424,11 +423,7 @@ export default function UsagePage() {
                         </td>
                         <td className="py-2 pr-4 text-right">{fmtInt(r.totalTokens)}</td>
                         <td className="py-2 pr-4 text-right">{r.aiu.toFixed(2)}</td>
-                        {usdAvailable && (
-                          <td className="py-2 pr-4 text-right">
-                            {r.usd != null ? `$${r.usd.toFixed(3)}` : "—"}
-                          </td>
-                        )}
+                        <td className="py-2 pr-4 text-right">~${r.estimatedUsd.toFixed(2)}</td>
                         <td className="py-2 text-right">{fmtInt(r.attempts)}</td>
                       </tr>
                     ))}
