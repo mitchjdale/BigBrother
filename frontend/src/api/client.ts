@@ -58,6 +58,8 @@ export interface PlanView {
     aiu: number;
     usd: number | null;
     versions: number;
+    attempts: number;
+    failedAttempts: number;
   };
   versions: PlanVersionMeta[];
 }
@@ -119,6 +121,13 @@ export const api = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ feedback, model }),
+    }).then(json<{ planId: number; status: PlanStatus }>),
+
+  retry: (planId: number, model: string | null = null) =>
+    fetch(`${BASE}/plans/${planId}/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model }),
     }).then(json<{ planId: number; status: PlanStatus }>),
 
   editVersion: (planId: number, markdown: string) =>

@@ -50,6 +50,28 @@ export interface PlanResult {
 }
 
 /**
+ * Error thrown when a plan attempt fails after the Copilot session may already
+ * have consumed tokens. Carries any usage captured so the spend isn't lost
+ * (issue #11).
+ */
+export class PlanError extends Error {
+  usage: Usage | null;
+  constructor(message: string, usage: Usage | null) {
+    super(message);
+    this.name = "PlanError";
+    this.usage = usage;
+  }
+}
+
+function safeCaptureUsage(cwd: string, startedAt: string): Usage | null {
+  try {
+    return captureUsageByCwd(cwd, startedAt);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Clone the target repo into a unique dir, run the Copilot CLI in read-only
  * plan mode, capture the plan markdown (stdout) and the per-session cost.
  */
@@ -84,11 +106,19 @@ export async function generatePlan(
     const selectedModel = opts.model === undefined ? config.planModel : opts.model;
     if (selectedModel) args.push("--model", selectedModel);
 
-    const { stdout } = await run("copilot", args, {
-      cwd,
-      maxBuffer: 64 * 1024 * 1024,
-      env: copilotEnv(),
-    });
+    let stdout: string;
+    try {
+      ({ stdout } = await run("copilot", args, {
+        cwd,
+        maxBuffer: 64 * 1024 * 1024,
+        env: copilotEnv(),
+      }));
+    } catch (err) {
+      // The Copilot session may still have recorded token usage before failing;
+      // capture it so the cost is retained (issue #11).
+      const usage = safeCaptureUsage(cwd, startedAt);
+      throw new PlanError(err instanceof Error ? err.message : String(err), usage);
+    }
 
     const usage = captureUsageByCwd(cwd, startedAt);
     return { markdown: stdout.trim(), usage, sessionCwd: cwd };

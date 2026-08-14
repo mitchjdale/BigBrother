@@ -2,7 +2,15 @@ import type { Cost } from "@/api/client";
 import { Coins, Hash, Clock } from "lucide-react";
 
 interface Props {
-  total: { aiu: number; usd: number | null; inputTokens: number; outputTokens: number; versions: number };
+  total: {
+    aiu: number;
+    usd: number | null;
+    inputTokens: number;
+    outputTokens: number;
+    versions: number;
+    attempts?: number;
+    failedAttempts?: number;
+  };
   current?: Cost;
 }
 
@@ -27,7 +35,12 @@ export function CostBar({ total, current }: Props) {
           {(current.durationMs / 1000).toFixed(1)}s
         </span>
       )}
-      <span className="ml-auto text-muted-foreground">{total.versions} version(s)</span>
+      <span className="ml-auto text-muted-foreground">
+        {total.attempts != null && total.attempts !== total.versions
+          ? `${total.attempts} attempt(s) · ${total.versions} version(s)`
+          : `${total.versions} version(s)`}
+        {total.failedAttempts ? ` · ${total.failedAttempts} failed` : ""}
+      </span>
     </div>
   );
 }

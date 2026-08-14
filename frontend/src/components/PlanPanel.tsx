@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "./StatusBadge";
 import { CostBar } from "./CostBar";
 import { api, type PlanView } from "@/api/client";
-import { ExternalLink, Loader2, Pencil, RefreshCw, Rocket, Save, X } from "lucide-react";
+import { ExternalLink, Loader2, Pencil, RefreshCw, Rocket, RotateCcw, Save, X } from "lucide-react";
 
 const POLL_MS = 2500;
 
@@ -88,6 +88,20 @@ export function PlanPanel({ planId, planningModel, executionModel }: Props) {
     }
   };
 
+  const doRetry = async () => {
+    setBusy(true);
+    try {
+      await api.retry(planId, planningModel);
+      setError(null);
+      await refresh();
+      poll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const poll = () => {
     const id = window.setInterval(async () => {
       const p = await api.getPlan(planId);
@@ -124,6 +138,18 @@ export function PlanPanel({ planId, planningModel, executionModel }: Props) {
       {error && <div className="rounded-md bg-destructive/10 p-2 text-sm text-destructive">{error}</div>}
       {plan.error && (
         <div className="rounded-md bg-destructive/10 p-2 text-sm text-destructive">{plan.error}</div>
+      )}
+
+      {plan.status === "failed" && (
+        <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2">
+          <span className="text-sm text-muted-foreground">
+            This plan attempt failed. Retry keeps the previous token usage.
+          </span>
+          <Button variant="outline" size="sm" onClick={doRetry} disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+            Retry plan
+          </Button>
+        </div>
       )}
 
       {plan.pr?.url && (

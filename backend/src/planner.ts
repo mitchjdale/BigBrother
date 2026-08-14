@@ -1,6 +1,6 @@
 import { config } from "./config.js";
 import { db } from "./db.js";
-import { generatePlan } from "./copilot.js";
+import { generatePlan, PlanError } from "./copilot.js";
 import { getIssue } from "./github.js";
 import { enqueuePlan } from "./queue.js";
 import type { PlanVersionRow, RepoRef } from "./types.js";
@@ -171,17 +171,41 @@ export function schedulePlanJob(
         );
       const versionId = Number(versionInfo.lastInsertRowid);
 
+      // Record the attempt's token spend on the job so cumulative usage is
+      // retained across all attempts (issue #11).
+      db.prepare(
+        `UPDATE jobs SET status='done', input_tokens=?, output_tokens=?, nano_aiu=?,
+           model=?, duration_ms=?, updated_at=datetime('now') WHERE id=?`,
+      ).run(
+        result.usage.inputTokens,
+        result.usage.outputTokens,
+        result.usage.nanoAiu,
+        result.usage.model,
+        result.usage.durationMs,
+        jobId,
+      );
+
       db.prepare(
         `UPDATE plans SET status='ready', current_version_id=?, error=NULL, updated_at=datetime('now') WHERE id=?`,
       ).run(versionId, planId);
-      db.prepare(`UPDATE jobs SET status='done', updated_at=datetime('now') WHERE id=?`).run(jobId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      // A failed attempt may still have consumed tokens — retain that spend on
+      // the job row so it counts toward cumulative usage (issue #11).
+      const usage = err instanceof PlanError ? err.usage : null;
       db.prepare(
         `UPDATE plans SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`,
       ).run(msg, planId);
-      db.prepare(`UPDATE jobs SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`).run(
+      db.prepare(
+        `UPDATE jobs SET status='failed', error=?, input_tokens=?, output_tokens=?, nano_aiu=?,
+           model=?, duration_ms=?, updated_at=datetime('now') WHERE id=?`,
+      ).run(
         msg,
+        usage?.inputTokens ?? 0,
+        usage?.outputTokens ?? 0,
+        usage?.nanoAiu ?? 0,
+        usage?.model ?? null,
+        usage?.durationMs ?? 0,
         jobId,
       );
     }
@@ -201,9 +225,20 @@ export function getPlanView(planId: number) {
 
   const current = versions.find((v) => v.id === plan.current_version_id) ?? versions.at(-1) ?? null;
 
-  const totalNanoAiu = versions.reduce((s, v) => s + v.nano_aiu, 0);
-  const totalInput = versions.reduce((s, v) => s + v.input_tokens, 0);
-  const totalOutput = versions.reduce((s, v) => s + v.output_tokens, 0);
+  // Cumulative cost is summed from the plan's JOB attempts, so it retains the
+  // token spend of every attempt — including failed ones and superseded
+  // versions — not just the versions that produced markdown (issue #11).
+  const attempts = db
+    .prepare(
+      `SELECT input_tokens, output_tokens, nano_aiu, status
+       FROM jobs WHERE plan_id=? AND type='plan'`,
+    )
+    .all(planId) as { input_tokens: number; output_tokens: number; nano_aiu: number; status: string }[];
+
+  const totalNanoAiu = attempts.reduce((s, a) => s + a.nano_aiu, 0);
+  const totalInput = attempts.reduce((s, a) => s + a.input_tokens, 0);
+  const totalOutput = attempts.reduce((s, a) => s + a.output_tokens, 0);
+  const failedAttempts = attempts.filter((a) => a.status === "failed").length;
   const aiu = totalNanoAiu / 1e9;
 
   const pr = db
@@ -247,6 +282,8 @@ export function getPlanView(planId: number) {
       aiu,
       usd: config.usdPerAiu > 0 ? aiu * config.usdPerAiu : null,
       versions: versions.length,
+      attempts: attempts.length,
+      failedAttempts,
     },
     versions: versions.map((v) => ({
       versionNo: v.version_no,
