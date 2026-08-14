@@ -64,6 +64,22 @@ CREATE TABLE IF NOT EXISTS prs (
 );
 `);
 
+// --- Migrations for existing databases ---
+// Track per-attempt token/cost on the jobs table so cumulative usage is
+// retained even when an attempt fails or a plan is re-run (issue #11).
+function ensureColumn(table: string, column: string, ddl: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  }
+}
+
+ensureColumn("jobs", "input_tokens", "input_tokens INTEGER NOT NULL DEFAULT 0");
+ensureColumn("jobs", "output_tokens", "output_tokens INTEGER NOT NULL DEFAULT 0");
+ensureColumn("jobs", "nano_aiu", "nano_aiu INTEGER NOT NULL DEFAULT 0");
+ensureColumn("jobs", "model", "model TEXT");
+ensureColumn("jobs", "duration_ms", "duration_ms INTEGER NOT NULL DEFAULT 0");
+
 export function now(): string {
   return new Date().toISOString();
 }

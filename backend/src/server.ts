@@ -56,6 +56,8 @@ app.get("/issues/:number/plan", (req, res) => {
 });
 
 // --- M2: "Create plan" — enqueue a read-only planning job ---
+// Reuses an existing plan record for the issue if one exists, so a re-run
+// accumulates onto the same plan and its prior token usage is retained (#11).
 app.post("/issues/:number/plan", async (req, res) => {
   const issueNumber = Number(req.params.number);
   if (!Number.isInteger(issueNumber)) return res.status(400).json({ error: "invalid issue number" });
@@ -64,12 +66,44 @@ app.post("/issues/:number/plan", async (req, res) => {
 
   try {
     const issue = await getIssue(issueNumber);
+
+    const existingId = getLatestPlanIdForIssue(issue.number);
+    if (existingId != null) {
+      const existing = db.prepare(`SELECT status FROM plans WHERE id=?`).get(existingId) as
+        | { status: string }
+        | undefined;
+      // Don't double-schedule while a job for this plan is already in flight.
+      if (existing && (existing.status === "planning" || existing.status === "executing")) {
+        return res.status(202).json({ planId: existingId, status: existing.status });
+      }
+      schedulePlanJob(existingId, issue.number, { model: parsedModel.model });
+      return res.status(202).json({ planId: existingId, status: "planning" });
+    }
+
     const planId = createPlanRecord(issue.number, issue.title);
     schedulePlanJob(planId, issue.number, { model: parsedModel.model });
     res.status(202).json({ planId, status: "planning" });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }
+});
+
+// --- Issue #11: retry a failed (or completed) plan in-place, retaining cost ---
+app.post("/plans/:id/retry", (req, res) => {
+  const planId = Number(req.params.id);
+  const parsedModel = parseModel(req.body);
+  if (parsedModel.error) return res.status(400).json({ error: parsedModel.error });
+
+  const plan = db.prepare(`SELECT issue_number, status FROM plans WHERE id=?`).get(planId) as
+    | { issue_number: number; status: string }
+    | undefined;
+  if (!plan) return res.status(404).json({ error: "plan not found" });
+  if (plan.status === "planning" || plan.status === "executing") {
+    return res.status(409).json({ error: `plan is already ${plan.status}` });
+  }
+
+  schedulePlanJob(planId, plan.issue_number, { model: parsedModel.model });
+  res.status(202).json({ planId, status: "planning" });
 });
 
 // --- M3 hook: regenerate with feedback ---

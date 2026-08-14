@@ -72,9 +72,10 @@ are stripped before those subprocesses run.
 | GET  | `/repos/issues` | list open issues (M1) |
 | GET  | `/plans` | latest plan per issue (dashboard hydration after reload) |
 | GET  | `/issues/:number/plan` | latest persisted plan for an issue (404 if none) |
-| POST | `/issues/:number/plan` | enqueue a plan (`{ model?: string|null }`) → `{ planId }` (202) |
+| POST | `/issues/:number/plan` | enqueue a plan (`{ model?: string\|null }`) → `{ planId }` (202). Reuses the issue's existing plan record so token usage accumulates (#11) |
+| POST | `/plans/:id/retry` | re-run a failed/completed plan in-place (`{ model?: string\|null }`), retaining prior token usage (#11) |
 | GET  | `/plans/:id` | status + plan markdown + cost + PR |
-| POST | `/plans/:id/regenerate` | `{ feedback, model?: string|null }` → revised plan (M3) |
+| POST | `/plans/:id/regenerate` | `{ feedback, model?: string\|null }` → revised plan (M3) |
 | PATCH | `/plans/:id/version` | `{ markdown }` → developer-edited version (M3) |
 | POST | `/plans/:id/execute` | approve (`{ model?: string|null }`) → Copilot cloud agent → draft PR (M4) |
 | POST | `/plans/:id/refresh-execution` | re-poll agent task for the draft PR / state (M4) |
@@ -107,7 +108,7 @@ src/
 |---|---|
 | `plans` | one row per issue plan: `status` (idle/planning/ready/executing/pr_open/failed), `current_version_id`, `error` |
 | `plan_versions` | each plan revision: `markdown`, `source` (generated/regenerated/user_edited), `feedback_prompt`, `input_tokens`, `output_tokens`, `nano_aiu`, `model`, `duration_ms` |
-| `jobs` | queued/running plan & execute jobs: `type`, `status`, `session_id`, `error` |
+| `jobs` | queued/running plan & execute jobs: `type`, `status`, `session_id`, `error`, plus per-attempt cost (`input_tokens`, `output_tokens`, `nano_aiu`, `model`, `duration_ms`). Cumulative plan cost is summed from these so failed/superseded attempts are retained (#11) |
 | `prs` | execution result: `session_ref`, `pr_number`, `url`, `branch`, `agent_state`, `screenshot_url` |
 
 ## Environment variables (`.env`)
