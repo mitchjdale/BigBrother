@@ -42,6 +42,8 @@ npm run dev               # or: npm run build && npm start
 |---|---|---|
 | GET  | `/health` | sanity + token check |
 | GET  | `/repos/issues` | list open issues (M1) |
+| GET  | `/plans` | latest plan per issue (dashboard hydration after reload) |
+| GET  | `/issues/:number/plan` | latest persisted plan for an issue (404 if none) |
 | POST | `/issues/:number/plan` | enqueue a plan → `{ planId }` (202) |
 | GET  | `/plans/:id` | status + plan markdown + cost + PR |
 | POST | `/plans/:id/regenerate` | `{ feedback }` → revised plan (M3) |

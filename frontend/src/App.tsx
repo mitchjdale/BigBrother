@@ -53,6 +53,29 @@ export default function App() {
     }, 2500);
   }, []);
 
+  // Restore persisted plans after a page/server restart so previously planned
+  // issues still show their plan (issue #7).
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const existing = await api.listPlans();
+        if (!active) return;
+        const map: Record<number, PlanRef> = {};
+        for (const p of existing) {
+          map[p.issueNumber] = { planId: p.planId, status: p.status };
+          if (p.status === "planning" || p.status === "executing") trackPlan(p.issueNumber, p.planId);
+        }
+        setPlans((prev) => ({ ...map, ...prev }));
+      } catch {
+        /* no persisted plans / backend unavailable — ignore */
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [trackPlan]);
+
   const createPlan = async (issue: Issue) => {
     setCreating((c) => ({ ...c, [issue.number]: true }));
     try {

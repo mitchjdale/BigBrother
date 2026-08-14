@@ -8,6 +8,8 @@ import {
   getPlanView,
   saveUserEditedVersion,
   getCurrentPlanMarkdown,
+  getLatestPlanIdForIssue,
+  listLatestPlansByIssue,
 } from "./planner.js";
 import { scheduleExecuteJob, refreshExecution } from "./execute.js";
 
@@ -25,6 +27,22 @@ app.get("/repos/issues", async (_req, res) => {
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }
+});
+
+// --- Hydration: latest plan per issue, so the UI can restore state after a reload ---
+app.get("/plans", (_req, res) => {
+  res.json(listLatestPlansByIssue());
+});
+
+// --- Fetch the latest persisted plan for a given issue ---
+app.get("/issues/:number/plan", (req, res) => {
+  const issueNumber = Number(req.params.number);
+  if (!Number.isInteger(issueNumber)) return res.status(400).json({ error: "invalid issue number" });
+  const planId = getLatestPlanIdForIssue(issueNumber);
+  if (planId == null) return res.status(404).json({ error: "no plan for issue" });
+  const view = getPlanView(planId);
+  if (!view) return res.status(404).json({ error: "no plan for issue" });
+  res.json(view);
 });
 
 // --- M2: "Create plan" — enqueue a read-only planning job ---

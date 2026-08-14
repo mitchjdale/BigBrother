@@ -22,6 +22,39 @@ export function createPlanRecord(issueNumber: number, issueTitle: string): numbe
   return Number(info.lastInsertRowid);
 }
 
+/** Most recent plan id for an issue in the configured repo, or null. */
+export function getLatestPlanIdForIssue(issueNumber: number): number | null {
+  const row = db
+    .prepare(
+      `SELECT id FROM plans
+       WHERE repo_owner=? AND repo_name=? AND issue_number=?
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(config.repo.owner, config.repo.name, issueNumber) as { id: number } | undefined;
+  return row?.id ?? null;
+}
+
+/** One entry per issue (its latest plan) for dashboard hydration after a reload. */
+export function listLatestPlansByIssue(): { issueNumber: number; planId: number; status: string }[] {
+  return db
+    .prepare(
+      `SELECT p.issue_number AS issueNumber, p.id AS planId, p.status AS status
+       FROM plans p
+       WHERE p.repo_owner=? AND p.repo_name=?
+         AND p.id = (
+           SELECT MAX(id) FROM plans
+           WHERE issue_number = p.issue_number
+             AND repo_owner = p.repo_owner AND repo_name = p.repo_name
+         )
+       ORDER BY p.id DESC`,
+    )
+    .all(config.repo.owner, config.repo.name) as {
+    issueNumber: number;
+    planId: number;
+    status: string;
+  }[];
+}
+
 function nextVersionNo(planId: number): number {
   const row = db
     .prepare(`SELECT COALESCE(MAX(version_no), 0) + 1 AS n FROM plan_versions WHERE plan_id = ?`)
