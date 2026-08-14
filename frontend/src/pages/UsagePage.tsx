@@ -17,6 +17,7 @@ import {
 } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { usePersistentState, readCache, writeCache } from "@/lib/usePersistentState";
 import { Coins, Hash, Loader2, RefreshCw } from "lucide-react";
 
 type Metric = "tokens" | "aiu" | "usd";
@@ -57,14 +58,16 @@ function fmtInt(n: number): string {
 }
 
 export default function UsagePage() {
-  const [repos, setRepos] = useState<RepoRef[]>([]);
-  const [repoKey, setRepoKey] = useState(""); // "" = all, else "owner/name"
-  const [granularity, setGranularity] = useState<UsageGranularity>("day");
-  const [preset, setPreset] = useState<Preset>("30");
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
-  const [metric, setMetric] = useState<Metric>("tokens");
-  const [phase, setPhase] = useState<Phase>("both");
+  const [repos, setRepos] = useState<RepoRef[]>(
+    () => readCache<{ repos: RepoRef[] }>("bb.cache.repos")?.repos ?? [],
+  );
+  const [repoKey, setRepoKey] = usePersistentState("bb.usage.repo", ""); // "" = all, else "owner/name"
+  const [granularity, setGranularity] = usePersistentState<UsageGranularity>("bb.usage.granularity", "day");
+  const [preset, setPreset] = usePersistentState<Preset>("bb.usage.preset", "30");
+  const [customFrom, setCustomFrom] = usePersistentState("bb.usage.customFrom", "");
+  const [customTo, setCustomTo] = usePersistentState("bb.usage.customTo", "");
+  const [metric, setMetric] = usePersistentState<Metric>("bb.usage.metric", "tokens");
+  const [phase, setPhase] = usePersistentState<Phase>("bb.usage.phase", "both");
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +90,7 @@ export default function UsagePage() {
       .listRepos()
       .then((payload) => {
         if (active) setRepos(payload.repos);
+        writeCache("bb.cache.repos", payload);
       })
       .catch(() => {
         /* repo filter is optional — ignore */
@@ -97,7 +101,15 @@ export default function UsagePage() {
   }, []);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const cacheKey = `bb.cache.usage:${repoKey || "all"}:${range.from ?? ""}:${range.to ?? ""}:${granularity}`;
+    const cached = readCache<UsageReport>(cacheKey);
+    if (cached) {
+      // Show cached report immediately and revalidate in the background.
+      setReport(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
       const data = await api.getUsage({
         repo: selectedRepo,
@@ -106,13 +118,14 @@ export default function UsagePage() {
         granularity,
       });
       setReport(data);
+      writeCache(cacheKey, data);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [selectedRepo, range.from, range.to, granularity]);
+  }, [selectedRepo, repoKey, range.from, range.to, granularity]);
 
   useEffect(() => {
     load();
@@ -122,7 +135,7 @@ export default function UsagePage() {
 
   useEffect(() => {
     if (metric === "usd" && report && !usdAvailable) setMetric("tokens");
-  }, [metric, report, usdAvailable]);
+  }, [metric, report, usdAvailable, setMetric]);
 
   const chartData = useMemo(
     () =>

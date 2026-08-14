@@ -4,6 +4,7 @@ import { IssueCard } from "@/components/IssueCard";
 import { IssueDetail } from "@/components/IssueDetail";
 import { PlanPanel } from "@/components/PlanPanel";
 import { Button } from "@/components/ui/button";
+import { usePersistentState, readCache, writeCache } from "@/lib/usePersistentState";
 import { Eye, Loader2, RefreshCw } from "lucide-react";
 
 interface PlanRef {
@@ -24,18 +25,28 @@ const MODEL_OPTIONS = [
 ];
 
 export default function DashboardPage() {
-  const [repoOptions, setRepoOptions] = useState<RepoRef[]>([]);
-  const [selectedOwner, setSelectedOwner] = useState("");
-  const [selectedRepoName, setSelectedRepoName] = useState("");
-  const [loadingRepos, setLoadingRepos] = useState(true);
+  const [repoOptions, setRepoOptions] = useState<RepoRef[]>(
+    () => readCache<{ defaultRepo: RepoRef; repos: RepoRef[] }>("bb.cache.repos")?.repos ?? [],
+  );
+  const [selectedOwner, setSelectedOwner] = usePersistentState("bb.dashboard.owner", "");
+  const [selectedRepoName, setSelectedRepoName] = usePersistentState("bb.dashboard.repo", "");
+  const [loadingRepos, setLoadingRepos] = useState(
+    () => readCache<{ repos: RepoRef[] }>("bb.cache.repos") == null,
+  );
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [plans, setPlans] = useState<Record<number, PlanRef>>({});
   const [creating, setCreating] = useState<Record<number, boolean>>({});
   const [selected, setSelected] = useState<number | null>(null);
-  const [planningModel, setPlanningModel] = useState<string | null>(null);
-  const [executionModel, setExecutionModel] = useState<string | null>(null);
+  const [planningModel, setPlanningModel] = usePersistentState<string | null>(
+    "bb.dashboard.planningModel",
+    null,
+  );
+  const [executionModel, setExecutionModel] = usePersistentState<string | null>(
+    "bb.dashboard.executionModel",
+    null,
+  );
   const pollers = useRef<Record<number, number>>({});
   const ownerOptions = [...new Set(repoOptions.map((r) => r.owner))];
   const reposForOwner = repoOptions.filter((r) => r.owner === selectedOwner);
@@ -54,9 +65,19 @@ export default function DashboardPage() {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    const cacheKey = `bb.cache.issues:${selectedRepo.owner}/${selectedRepo.name}`;
+    const cached = readCache<Issue[]>(cacheKey);
+    if (cached) {
+      // Show cached issues immediately and revalidate in the background.
+      setIssues(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
-      setIssues(await api.listIssues(selectedRepo));
+      const fresh = await api.listIssues(selectedRepo);
+      setIssues(fresh);
+      writeCache(cacheKey, fresh);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -90,13 +111,17 @@ export default function DashboardPage() {
   useEffect(() => {
     let active = true;
     (async () => {
-      setLoadingRepos(true);
       try {
         const payload = await api.listRepos();
         if (!active) return;
         setRepoOptions(payload.repos);
-        setSelectedOwner(payload.defaultRepo.owner);
-        setSelectedRepoName(payload.defaultRepo.name);
+        writeCache("bb.cache.repos", payload);
+        // Keep a persisted selection if it's still valid; otherwise fall back
+        // to the backend default repo.
+        if (!payload.repos.some((r) => r.owner === selectedOwner)) {
+          setSelectedOwner(payload.defaultRepo.owner);
+          setSelectedRepoName(payload.defaultRepo.name);
+        }
       } catch (e) {
         if (!active) return;
         setError(e instanceof Error ? e.message : String(e));
@@ -107,21 +132,31 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
+    // Runs once on mount; intentionally captures the initial persisted
+    // selection to decide whether to apply the backend default.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!selectedOwner) return;
+    // Wait until repos have loaded before "correcting" the selection, otherwise
+    // we'd wipe the persisted repo name while the list is momentarily empty.
+    if (reposForOwner.length === 0) return;
     if (reposForOwner.some((r) => r.name === selectedRepoName)) return;
     setSelectedRepoName(reposForOwner[0]?.name ?? "");
-  }, [reposForOwner, selectedOwner, selectedRepoName]);
+  }, [reposForOwner, selectedOwner, selectedRepoName, setSelectedRepoName]);
 
   useEffect(() => {
     clearPollers();
-    setPlans({});
+    const plansKey = selectedRepo
+      ? `bb.cache.plans:${selectedRepo.owner}/${selectedRepo.name}`
+      : null;
+    // Seed plan badges from cache so they show instantly on refresh.
+    setPlans(plansKey ? readCache<Record<number, PlanRef>>(plansKey) ?? {} : {});
     setCreating({});
     setSelected(null);
     loadIssues();
-  }, [clearPollers, loadIssues]);
+  }, [clearPollers, loadIssues, selectedRepo]);
 
   useEffect(() => {
     if (!selectedRepo) return;
@@ -135,6 +170,7 @@ export default function DashboardPage() {
           map[p.issueNumber] = { planId: p.planId, status: p.status };
           if (p.status === "planning" || p.status === "executing") trackPlan(p.issueNumber, p.planId);
         }
+        writeCache(`bb.cache.plans:${selectedRepo.owner}/${selectedRepo.name}`, map);
         setPlans((prev) => ({ ...map, ...prev }));
       } catch {
         /* no persisted plans / backend unavailable — ignore */
