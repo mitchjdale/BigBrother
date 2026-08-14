@@ -1,0 +1,29 @@
+{
+  "name": "bigbrother-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "M2 PoC: dashboard backend that generates read-only implementation plans for GitHub issues using the Copilot CLI, with per-plan token/AIU cost capture.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@octokit/rest": "^21.0.2",
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2",
+    "p-queue": "^8.0.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

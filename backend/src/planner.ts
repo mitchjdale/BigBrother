@@ -1,0 +1,206 @@
+import { config } from "./config.js";
+import { db } from "./db.js";
+import { generatePlan } from "./copilot.js";
+import { getIssue } from "./github.js";
+import { enqueuePlan } from "./queue.js";
+import type { PlanVersionRow } from "./types.js";
+
+interface PlanRow {
+  id: number;
+  issue_number: number;
+  status: string;
+  current_version_id: number | null;
+}
+
+export function createPlanRecord(issueNumber: number, issueTitle: string): number {
+  const info = db
+    .prepare(
+      `INSERT INTO plans (repo_owner, repo_name, issue_number, issue_title, status)
+       VALUES (?, ?, ?, ?, 'planning')`,
+    )
+    .run(config.repo.owner, config.repo.name, issueNumber, issueTitle);
+  return Number(info.lastInsertRowid);
+}
+
+function nextVersionNo(planId: number): number {
+  const row = db
+    .prepare(`SELECT COALESCE(MAX(version_no), 0) + 1 AS n FROM plan_versions WHERE plan_id = ?`)
+    .get(planId) as { n: number };
+  return row.n;
+}
+
+/** M3: persist a developer-edited plan as a new version (no agent, no cost). */
+export function saveUserEditedVersion(planId: number, markdown: string): number | null {
+  const plan = db.prepare(`SELECT id FROM plans WHERE id=?`).get(planId) as { id: number } | undefined;
+  if (!plan) return null;
+  const versionNo = nextVersionNo(planId);
+  const info = db
+    .prepare(
+      `INSERT INTO plan_versions (plan_id, version_no, markdown, source)
+       VALUES (?, ?, ?, 'user_edited')`,
+    )
+    .run(planId, versionNo, markdown);
+  const versionId = Number(info.lastInsertRowid);
+  db.prepare(
+    `UPDATE plans SET status='ready', current_version_id=?, updated_at=datetime('now') WHERE id=?`,
+  ).run(versionId, planId);
+  return versionId;
+}
+
+/** Markdown of the plan version currently selected (for execute). */
+export function getCurrentPlanMarkdown(planId: number): string | null {
+  const plan = db.prepare(`SELECT current_version_id FROM plans WHERE id=?`).get(planId) as
+    | { current_version_id: number | null }
+    | undefined;
+  if (!plan) return null;
+  const row = plan.current_version_id
+    ? (db.prepare(`SELECT markdown FROM plan_versions WHERE id=?`).get(plan.current_version_id) as
+        | { markdown: string }
+        | undefined)
+    : (db
+        .prepare(`SELECT markdown FROM plan_versions WHERE plan_id=? ORDER BY version_no DESC LIMIT 1`)
+        .get(planId) as { markdown: string } | undefined);
+  return row?.markdown ?? null;
+}
+
+/** Run a plan (or regeneration) as a queued, concurrent job. */
+export function schedulePlanJob(
+  planId: number,
+  issueNumber: number,
+  opts: { feedback?: string } = {},
+): void {
+  const jobInfo = db
+    .prepare(`INSERT INTO jobs (plan_id, type, status) VALUES (?, 'plan', 'queued')`)
+    .run(planId);
+  const jobId = Number(jobInfo.lastInsertRowid);
+
+  db.prepare(`UPDATE plans SET status='planning', updated_at=datetime('now') WHERE id=?`).run(planId);
+
+  enqueuePlan(async () => {
+    db.prepare(`UPDATE jobs SET status='running', updated_at=datetime('now') WHERE id=?`).run(jobId);
+    try {
+      const issue = await getIssue(issueNumber);
+
+      let previousPlan: string | undefined;
+      if (opts.feedback) {
+        const prev = db
+          .prepare(
+            `SELECT markdown FROM plan_versions WHERE plan_id=? ORDER BY version_no DESC LIMIT 1`,
+          )
+          .get(planId) as { markdown: string } | undefined;
+        previousPlan = prev?.markdown;
+      }
+
+      const result = await generatePlan(issue, { feedback: opts.feedback, previousPlan });
+
+      const versionNo = nextVersionNo(planId);
+      const source = opts.feedback ? "regenerated" : "generated";
+      const versionInfo = db
+        .prepare(
+          `INSERT INTO plan_versions
+             (plan_id, version_no, markdown, source, feedback_prompt,
+              input_tokens, output_tokens, nano_aiu, model, duration_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          planId,
+          versionNo,
+          result.markdown,
+          source,
+          opts.feedback ?? null,
+          result.usage.inputTokens,
+          result.usage.outputTokens,
+          result.usage.nanoAiu,
+          result.usage.model,
+          result.usage.durationMs,
+        );
+      const versionId = Number(versionInfo.lastInsertRowid);
+
+      db.prepare(
+        `UPDATE plans SET status='ready', current_version_id=?, error=NULL, updated_at=datetime('now') WHERE id=?`,
+      ).run(versionId, planId);
+      db.prepare(`UPDATE jobs SET status='done', updated_at=datetime('now') WHERE id=?`).run(jobId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      db.prepare(
+        `UPDATE plans SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`,
+      ).run(msg, planId);
+      db.prepare(`UPDATE jobs SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`).run(
+        msg,
+        jobId,
+      );
+    }
+  });
+}
+
+/** Full plan view for the API: status + latest version + accumulated cost. */
+export function getPlanView(planId: number) {
+  const plan = db.prepare(`SELECT * FROM plans WHERE id=?`).get(planId) as
+    | (PlanRow & Record<string, unknown>)
+    | undefined;
+  if (!plan) return null;
+
+  const versions = db
+    .prepare(`SELECT * FROM plan_versions WHERE plan_id=? ORDER BY version_no ASC`)
+    .all(planId) as PlanVersionRow[];
+
+  const current = versions.find((v) => v.id === plan.current_version_id) ?? versions.at(-1) ?? null;
+
+  const totalNanoAiu = versions.reduce((s, v) => s + v.nano_aiu, 0);
+  const totalInput = versions.reduce((s, v) => s + v.input_tokens, 0);
+  const totalOutput = versions.reduce((s, v) => s + v.output_tokens, 0);
+  const aiu = totalNanoAiu / 1e9;
+
+  const pr = db
+    .prepare(`SELECT pr_number, url, branch, agent_state, screenshot_url FROM prs WHERE plan_id=? ORDER BY id DESC LIMIT 1`)
+    .get(planId) as
+    | { pr_number: number | null; url: string | null; branch: string | null; agent_state: string | null; screenshot_url: string | null }
+    | undefined;
+
+  return {
+    id: plan.id,
+    issueNumber: plan.issue_number,
+    status: plan.status,
+    error: plan.error,
+    pr: pr
+      ? {
+          number: pr.pr_number,
+          url: pr.url,
+          branch: pr.branch,
+          agentState: pr.agent_state,
+          screenshotUrl: pr.screenshot_url,
+        }
+      : null,
+    currentPlan: current
+      ? {
+          versionNo: current.version_no,
+          markdown: current.markdown,
+          source: current.source,
+          cost: {
+            inputTokens: current.input_tokens,
+            outputTokens: current.output_tokens,
+            aiu: current.nano_aiu / 1e9,
+            usd: config.usdPerAiu > 0 ? (current.nano_aiu / 1e9) * config.usdPerAiu : null,
+            model: current.model,
+            durationMs: current.duration_ms,
+          },
+        }
+      : null,
+    totalCost: {
+      inputTokens: totalInput,
+      outputTokens: totalOutput,
+      aiu,
+      usd: config.usdPerAiu > 0 ? aiu * config.usdPerAiu : null,
+      versions: versions.length,
+    },
+    versions: versions.map((v) => ({
+      versionNo: v.version_no,
+      source: v.source,
+      feedbackPrompt: v.feedback_prompt,
+      aiu: v.nano_aiu / 1e9,
+      inputTokens: v.input_tokens,
+      outputTokens: v.output_tokens,
+      createdAt: v.created_at,
+    })),
+  };
+}
