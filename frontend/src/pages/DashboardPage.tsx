@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Issue, type PlanStatus, type RepoRef } from "@/api/client";
 import { IssueCard } from "@/components/IssueCard";
+import { IssueDetail } from "@/components/IssueDetail";
 import { PlanPanel } from "@/components/PlanPanel";
 import { Button } from "@/components/ui/button";
 import { Eye, Loader2, RefreshCw } from "lucide-react";
@@ -160,6 +161,16 @@ export default function DashboardPage() {
   };
 
   const selectedPlanId = selected != null ? plans[selected]?.planId : undefined;
+  const selectedIssue = selected != null ? issues.find((i) => i.number === selected) ?? null : null;
+
+  // Reflect the current repo / selected issue in the browser tab title (issue #6).
+  useEffect(() => {
+    const repoLabel = selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : null;
+    const issueTitle =
+      selected != null ? issues.find((i) => i.number === selected)?.title : undefined;
+    const parts = [issueTitle, repoLabel, "BigBrother"].filter(Boolean);
+    document.title = parts.join(" · ");
+  }, [selectedRepo, selected, issues]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -270,17 +281,29 @@ export default function DashboardPage() {
         </aside>
 
         <main className="overflow-auto p-6">
-          {selectedPlanId ? (
-            <PlanPanel
-              key={selectedPlanId}
-              planId={selectedPlanId}
-              planningModel={planningModel}
-              executionModel={executionModel}
-            />
+          {selectedIssue ? (
+            <div className="flex h-full min-h-0 flex-col gap-4">
+              <IssueDetail issue={selectedIssue} />
+              {selectedPlanId ? (
+                <div className="min-h-0 flex-1">
+                  <PlanPanel
+                    key={selectedPlanId}
+                    planId={selectedPlanId}
+                    planningModel={planningModel}
+                    executionModel={executionModel}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-muted-foreground">
+                  <Eye className="h-8 w-8" />
+                  <p>Press "Create plan" on this issue to generate an implementation plan.</p>
+                </div>
+              )}
+            </div>
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
               <Eye className="h-8 w-8" />
-              <p>Select an issue and press "Create plan" to begin.</p>
+              <p>Select an issue to view its details and create a plan.</p>
             </div>
           )}
         </main>

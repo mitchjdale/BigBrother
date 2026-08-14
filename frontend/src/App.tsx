@@ -1,6 +1,7 @@
 import { NavLink, Route, Routes } from "react-router-dom";
 import DashboardPage from "@/pages/DashboardPage";
 import UsagePage from "@/pages/UsagePage";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { BarChart3, Eye, ListChecks } from "lucide-react";
 
 function navClass({ isActive }: { isActive: boolean }): string {
@@ -27,6 +28,9 @@ export default function App() {
           <NavLink to="/usage" className={navClass}>
             <BarChart3 className="h-4 w-4" /> Usage
           </NavLink>
+          <div className="ml-1">
+            <ThemeToggle />
+          </div>
         </nav>
       </div>
 
