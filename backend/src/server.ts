@@ -1,4 +1,5 @@
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { pinoHttp } from "pino-http";
 import { config } from "./config.js";
 import { db } from "./db.js";
@@ -12,6 +13,7 @@ import {
   getCurrentPlanMarkdown,
   getLatestPlanIdForIssue,
   listLatestPlansByIssue,
+  deletePlan,
 } from "./planner.js";
 import { scheduleExecuteJob, refreshExecution } from "./execute.js";
 import { getUsageReport, type Granularity } from "./reports.js";
@@ -19,6 +21,13 @@ import type { RepoRef } from "./types.js";
 
 const httpLog = log("http");
 const app = express();
+const clearPlanLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "too many requests" },
+});
 
 // Structured per-request logging (method, url, status, latency). Health checks
 // are logged at debug to keep the stream readable.
@@ -247,6 +256,20 @@ app.get("/plans/:id", (req, res) => {
   const view = getPlanView(Number(req.params.id));
   if (!view) return res.status(404).json({ error: "plan not found" });
   res.json(view);
+});
+
+app.delete("/plans/:id", clearPlanLimiter, (req, res) => {
+  const planId = Number(req.params.id);
+  if (!Number.isInteger(planId)) return res.status(400).json({ error: "invalid plan id" });
+  const plan = db.prepare(`SELECT status FROM plans WHERE id=?`).get(planId) as
+    | { status: string }
+    | undefined;
+  if (!plan) return res.status(404).json({ error: "plan not found" });
+  if (plan.status === "planning" || plan.status === "executing") {
+    return res.status(409).json({ error: `cannot clear while ${plan.status}` });
+  }
+  deletePlan(planId);
+  res.status(204).end();
 });
 
 // --- M3: developer edits the plan markdown → new version ---

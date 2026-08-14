@@ -39,6 +39,11 @@ export function getLatestPlanIdForIssue(issueNumber: number, repo: RepoRef): num
   return row?.id ?? null;
 }
 
+export function deletePlan(planId: number): boolean {
+  const info = db.prepare(`DELETE FROM plans WHERE id=?`).run(planId);
+  return info.changes > 0;
+}
+
 /** Sum best-effort estimated USD (model-aware) across every job, per issue. */
 function estimatedUsdByIssue(repo: RepoRef): Map<number, number> {
   const rows = db

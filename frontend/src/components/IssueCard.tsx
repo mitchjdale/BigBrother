@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "./StatusBadge";
 import type { Issue, PlanStatus } from "@/api/client";
-import { Loader2, Coins } from "lucide-react";
+import { Loader2, Coins, X } from "lucide-react";
 
 interface Props {
   issue: Issue;
@@ -11,7 +11,9 @@ interface Props {
   estimatedUsd?: number;
   selected: boolean;
   busy: boolean;
+  hasPlan: boolean;
   onCreatePlan: () => void;
+  onClearPlan: () => void;
   onSelect: () => void;
 }
 
@@ -26,7 +28,9 @@ export function IssueCard({
   estimatedUsd,
   selected,
   busy,
+  hasPlan,
   onCreatePlan,
+  onClearPlan,
   onSelect,
 }: Props) {
   return (
@@ -72,19 +76,34 @@ export function IssueCard({
               {fmtUsd(estimatedUsd)} est.
             </span>
           )}
-          <Button
-            size="sm"
-            disabled={busy || status === "planning"}
-            onClick={(e) => {
-              e.stopPropagation();
-              onCreatePlan();
-            }}
-          >
-            {busy || status === "planning" && (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            )}
-            Create plan
-          </Button>
+          {hasPlan ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || status === "planning" || status === "executing"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClearPlan();
+              }}
+            >
+              <X className="h-4 w-4" />
+              Clear plan
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              disabled={busy || status === "planning"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onCreatePlan();
+              }}
+            >
+              {(busy || status === "planning") && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              Create plan
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>
