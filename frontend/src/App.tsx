@@ -1,8 +1,11 @@
 import { NavLink, useLocation } from "react-router-dom";
 import DashboardPage from "@/pages/DashboardPage";
 import UsagePage from "@/pages/UsagePage";
+import SettingsPage from "@/pages/SettingsPage";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { BarChart3, ListChecks } from "lucide-react";
+import { usePersistentState } from "@/lib/usePersistentState";
+import type { IssueSource } from "@/api/client";
+import { BarChart3, ListChecks, Settings } from "lucide-react";
 import insigniaLogo from "@/assets/insignia-logo.png";
 
 function navClass({ isActive }: { isActive: boolean }): string {
@@ -16,6 +19,13 @@ function navClass({ isActive }: { isActive: boolean }): string {
 export default function App() {
   const { pathname } = useLocation();
   const isUsage = pathname === "/usage";
+  const isSettings = pathname === "/settings";
+  const isDashboard = !isUsage && !isSettings;
+
+  // Issue source (GitHub Issues | JIRA) is a global preference configured on the
+  // Settings page and consumed by the Dashboard. Lifted here so both pages —
+  // which stay mounted at once — share a single source of truth.
+  const [source, setSource] = usePersistentState<IssueSource>("bb.dashboard.source", "github");
 
   return (
     <div className="flex h-screen flex-col">
@@ -34,6 +44,9 @@ export default function App() {
           <NavLink to="/usage" className={navClass}>
             <BarChart3 className="h-4 w-4" /> Usage
           </NavLink>
+          <NavLink to="/settings" className={navClass}>
+            <Settings className="h-4 w-4" /> Settings
+          </NavLink>
           <div className="ml-1">
             <ThemeToggle />
           </div>
@@ -41,11 +54,14 @@ export default function App() {
       </header>
 
       <div className="mx-auto flex min-h-0 w-full max-w-[1400px] flex-1 flex-col">
-        <div className={isUsage ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
-          <DashboardPage />
+        <div className={isDashboard ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+          <DashboardPage source={source} setSource={setSource} />
         </div>
         <div className={isUsage ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
           <UsagePage />
+        </div>
+        <div className={isSettings ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+          <SettingsPage source={source} setSource={setSource} />
         </div>
       </div>
     </div>

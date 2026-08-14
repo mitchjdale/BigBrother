@@ -3,39 +3,49 @@ import { db } from "./db.js";
 import { log } from "./logger.js";
 import { estimateUsd } from "./pricing.js";
 import { generatePlan, PlanError } from "./copilot.js";
-import { getIssue } from "./github.js";
+import { fetchIssue } from "./issues.js";
 import { enqueuePlan } from "./queue.js";
-import type { PlanVersionRow, RepoRef } from "./types.js";
+import type { IssueSource, PlanVersionRow, RepoRef } from "./types.js";
 
 interface PlanRow {
   id: number;
   repo_owner: string;
   repo_name: string;
   repo_base: string;
+  issue_source: IssueSource;
+  issue_key: string;
   issue_number: number;
   status: string;
   current_version_id: number | null;
 }
 
-export function createPlanRecord(issueNumber: number, issueTitle: string, repo: RepoRef): number {
+export function createPlanRecord(
+  issue: { source: IssueSource; key: string; number: number | null; title: string },
+  repo: RepoRef,
+): number {
   const info = db
     .prepare(
-      `INSERT INTO plans (repo_owner, repo_name, repo_base, issue_number, issue_title, status)
-       VALUES (?, ?, ?, ?, ?, 'planning')`,
+      `INSERT INTO plans
+         (repo_owner, repo_name, repo_base, issue_source, issue_key, issue_number, issue_title, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'planning')`,
     )
-    .run(repo.owner, repo.name, repo.base, issueNumber, issueTitle);
+    .run(repo.owner, repo.name, repo.base, issue.source, issue.key, issue.number ?? 0, issue.title);
   return Number(info.lastInsertRowid);
 }
 
-/** Most recent plan id for an issue in the configured repo, or null. */
-export function getLatestPlanIdForIssue(issueNumber: number, repo: RepoRef): number | null {
+/** Most recent plan id for an issue (by source + key) in the given repo, or null. */
+export function getLatestPlanIdForIssue(
+  source: IssueSource,
+  issueKey: string,
+  repo: RepoRef,
+): number | null {
   const row = db
     .prepare(
       `SELECT id FROM plans
-       WHERE repo_owner=? AND repo_name=? AND issue_number=?
+       WHERE repo_owner=? AND repo_name=? AND issue_source=? AND issue_key=?
        ORDER BY id DESC LIMIT 1`,
     )
-    .get(repo.owner, repo.name, issueNumber) as { id: number } | undefined;
+    .get(repo.owner, repo.name, source, issueKey) as { id: number } | undefined;
   return row?.id ?? null;
 }
 
@@ -72,32 +82,43 @@ function estimatedUsdByIssue(repo: RepoRef): Map<number, number> {
 }
 
 /** One entry per issue (its latest plan) for dashboard hydration after a reload. */
-export function listLatestPlansByIssue(repo: RepoRef): {
-  issueNumber: number;
+export function listLatestPlansByIssue(
+  repo: RepoRef,
+  source: IssueSource,
+): {
+  issueKey: string;
+  issueNumber: number | null;
+  source: IssueSource;
   planId: number;
   status: string;
   estimatedUsd: number;
 }[] {
   const rows = db
     .prepare(
-      `SELECT p.issue_number AS issueNumber, p.id AS planId, p.status AS status
+      `SELECT p.issue_key AS issueKey, p.issue_number AS issueNumber,
+              p.issue_source AS source, p.id AS planId, p.status AS status
        FROM plans p
-       WHERE p.repo_owner=? AND p.repo_name=?
+       WHERE p.repo_owner=? AND p.repo_name=? AND p.issue_source=?
          AND p.id = (
            SELECT MAX(id) FROM plans
-           WHERE issue_number = p.issue_number
+           WHERE issue_source = p.issue_source AND issue_key = p.issue_key
              AND repo_owner = p.repo_owner AND repo_name = p.repo_name
          )
        ORDER BY p.id DESC`,
     )
-    .all(repo.owner, repo.name) as {
-    issueNumber: number;
+    .all(repo.owner, repo.name, source) as {
+    issueKey: string;
+    issueNumber: number | null;
+    source: IssueSource;
     planId: number;
     status: string;
   }[];
 
   const estimates = estimatedUsdByIssue(repo);
-  return rows.map((r) => ({ ...r, estimatedUsd: estimates.get(r.issueNumber) ?? 0 }));
+  return rows.map((r) => ({
+    ...r,
+    estimatedUsd: r.issueNumber != null ? estimates.get(r.issueNumber) ?? 0 : 0,
+  }));
 }
 
 export function listWorkedIssueNumbers(repo: RepoRef): number[] {
@@ -159,9 +180,19 @@ export function schedulePlanJob(
   opts: { feedback?: string; model?: string | null } = {},
 ): void {
   const plan = db
-    .prepare(`SELECT issue_number, repo_owner, repo_name, repo_base FROM plans WHERE id=?`)
+    .prepare(
+      `SELECT issue_source, issue_key, issue_number, repo_owner, repo_name, repo_base
+       FROM plans WHERE id=?`,
+    )
     .get(planId) as
-    | { issue_number: number; repo_owner: string; repo_name: string; repo_base: string | null }
+    | {
+        issue_source: IssueSource;
+        issue_key: string;
+        issue_number: number;
+        repo_owner: string;
+        repo_name: string;
+        repo_base: string | null;
+      }
     | undefined;
   if (!plan) throw new Error(`plan ${planId} not found`);
 
@@ -175,7 +206,8 @@ export function schedulePlanJob(
   const jobLog = log("planner").child({
     jobId,
     planId,
-    issueNumber: plan.issue_number,
+    issueKey: plan.issue_key,
+    source: plan.issue_source,
     repo: `${plan.repo_owner}/${plan.repo_name}`,
     kind: opts.feedback ? "regenerate" : "generate",
   });
@@ -190,7 +222,7 @@ export function schedulePlanJob(
         name: plan.repo_name,
         base: plan.repo_base || config.repo.base,
       };
-      const issue = await getIssue(plan.issue_number, targetRepo);
+      const issue = await fetchIssue(plan.issue_source, plan.issue_key, targetRepo);
 
       let previousPlan: string | undefined;
       if (opts.feedback) {
@@ -343,6 +375,8 @@ export function getPlanView(planId: number) {
   return {
     id: plan.id,
     issueNumber: plan.issue_number,
+    issueKey: plan.issue_key,
+    source: plan.issue_source,
     status: plan.status,
     error: plan.error,
     pr: pr

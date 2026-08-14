@@ -46,6 +46,18 @@ export const config = {
   usdPerAiu: Number(env("USD_PER_AIU", "0")),
   sqlitePath: path.resolve(expandHome(env("SQLITE_PATH", "./data/bigbrother.db"))),
   logLevel: env("LOG_LEVEL", "info"),
+  jira: {
+    baseUrl: env("JIRA_BASE_URL").replace(/\/+$/, ""),
+    email: env("JIRA_EMAIL"),
+    apiToken: env("JIRA_API_TOKEN"),
+    // Optional JQL suffix appended to the per-project query (e.g. to hide Done).
+    jql: env("JIRA_JQL", "statusCategory != Done ORDER BY updated DESC"),
+  },
 };
+
+/** True when JIRA credentials are configured so the source can be offered. */
+export function jiraConfigured(): boolean {
+  return Boolean(config.jira.baseUrl && config.jira.email && config.jira.apiToken);
+}
 
 export type Config = typeof config;
