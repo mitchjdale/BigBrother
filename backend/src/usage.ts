@@ -47,38 +47,7 @@ export function captureUsageByCwd(cwd: string, sinceIso: string): Usage {
   }
 }
 
-/**
- * Sum the per-turn usage for a Copilot session identified directly by its id.
- *
- * The implementation phase runs via `gh agent-task` (the Copilot cloud coding
- * agent) rather than the local CLI, and we only learn its session id from the
- * command output. When that session's usage is recorded in the local session
- * store this returns its token/AI-Unit spend; otherwise it returns EMPTY.
- *
- * Returns EMPTY (never throws) so a best-effort capture can't break execution.
- */
-export function captureUsageBySessionRef(sessionId: string): Usage {
-  if (!sessionId || !fs.existsSync(config.copilotSessionStore)) return EMPTY;
-
-  try {
-    const store = new Database(config.copilotSessionStore, {
-      readonly: true,
-      fileMustExist: true,
-    });
-    try {
-      const session = store
-        .prepare(`SELECT id FROM sessions WHERE id = ? LIMIT 1`)
-        .get(sessionId) as { id: string } | undefined;
-      if (!session) return EMPTY;
-      return sumUsageForSession(store, session.id);
-    } finally {
-      store.close();
-    }
-  } catch {
-    return EMPTY;
-  }
-}
-
+/** Sum the per-turn token/AI-Unit usage for a single Copilot session. */
 function sumUsageForSession(store: Database.Database, sessionId: string): Usage {
   const row = store
     .prepare(
