@@ -1,4 +1,4 @@
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import DashboardPage from "@/pages/DashboardPage";
 import UsagePage from "@/pages/UsagePage";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -11,6 +11,9 @@ function navClass({ isActive }: { isActive: boolean }): string {
 }
 
 export default function App() {
+  const { pathname } = useLocation();
+  const isUsage = pathname === "/usage";
+
   return (
     <div className="mx-auto flex h-screen max-w-[1400px] flex-col">
       <div className="flex items-center justify-between gap-4 border-b px-6 py-3">
@@ -34,10 +37,12 @@ export default function App() {
         </nav>
       </div>
 
-      <Routes>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/usage" element={<UsagePage />} />
-      </Routes>
+      <div className={isUsage ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
+        <DashboardPage />
+      </div>
+      <div className={isUsage ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+        <UsagePage />
+      </div>
     </div>
   );
 }
