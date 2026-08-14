@@ -55,7 +55,7 @@ export interface PlanResult {
  */
 export async function generatePlan(
   issue: Issue,
-  opts: { feedback?: string; previousPlan?: string } = {},
+  opts: { feedback?: string; previousPlan?: string; model?: string | null } = {},
 ): Promise<PlanResult> {
   fs.mkdirSync(config.workDir, { recursive: true });
   const jobDir = fs.mkdtempSync(path.join(config.workDir, `plan-${issue.number}-`));
@@ -80,7 +80,8 @@ export async function generatePlan(
       "--log-dir",
       path.join(cwd, ".copilot-logs"),
     ];
-    if (config.planModel) args.push("--model", config.planModel);
+    const selectedModel = opts.model === undefined ? config.planModel : opts.model;
+    if (selectedModel) args.push("--model", selectedModel);
 
     const { stdout } = await run("copilot", args, {
       cwd,

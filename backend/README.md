@@ -72,11 +72,11 @@ are stripped before those subprocesses run.
 | GET  | `/repos/issues` | list open issues (M1) |
 | GET  | `/plans` | latest plan per issue (dashboard hydration after reload) |
 | GET  | `/issues/:number/plan` | latest persisted plan for an issue (404 if none) |
-| POST | `/issues/:number/plan` | enqueue a plan → `{ planId }` (202) |
+| POST | `/issues/:number/plan` | enqueue a plan (`{ model?: string|null }`) → `{ planId }` (202) |
 | GET  | `/plans/:id` | status + plan markdown + cost + PR |
-| POST | `/plans/:id/regenerate` | `{ feedback }` → revised plan (M3) |
+| POST | `/plans/:id/regenerate` | `{ feedback, model?: string|null }` → revised plan (M3) |
 | PATCH | `/plans/:id/version` | `{ markdown }` → developer-edited version (M3) |
-| POST | `/plans/:id/execute` | approve → Copilot cloud agent → draft PR (M4) |
+| POST | `/plans/:id/execute` | approve (`{ model?: string|null }`) → Copilot cloud agent → draft PR (M4) |
 | POST | `/plans/:id/refresh-execution` | re-poll agent task for the draft PR / state (M4) |
 
 ## Not in this milestone
@@ -121,6 +121,7 @@ src/
 | `PLAN_CONCURRENCY` | `5` | how many plan/execute jobs run in parallel |
 | `WORK_DIR` | `./.work` | per-job clone dir (unique subdir, deleted after) |
 | `PLAN_MODEL` | *(auto)* | pin a Copilot model for planning |
+| `EXECUTE_MODEL` | *(auto)* | pin a Copilot model for execution |
 | `COPILOT_SESSION_STORE` | `~/.copilot/session-store.db` | CLI usage store for cost capture |
 | `USD_PER_AIU` | `0` | USD per AI Unit for a dollar figure (0 = report AIU/tokens only) |
 | `SQLITE_PATH` | `./data/bigbrother.db` | app database file |

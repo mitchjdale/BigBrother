@@ -40,7 +40,11 @@ function ghEnv() {
  * Approve + execute: hand the approved plan to the Copilot cloud agent, which
  * writes code and opens a DRAFT PR on the target repo.
  */
-export function scheduleExecuteJob(planId: number, planMarkdown: string): void {
+export function scheduleExecuteJob(
+  planId: number,
+  planMarkdown: string,
+  opts: { model?: string | null } = {},
+): void {
   const jobInfo = db
     .prepare(`INSERT INTO jobs (plan_id, type, status) VALUES (?, 'execute', 'queued')`)
     .run(planId);
@@ -57,20 +61,20 @@ export function scheduleExecuteJob(planId: number, planMarkdown: string): void {
         `Implement the following approved plan. Open a draft pull request with the changes.\n\n${planMarkdown}`,
       );
 
-      const { stdout, stderr } = await run(
-        "gh",
-        [
-          "agent-task",
-          "create",
-          "--from-file",
-          planFile,
-          "--repo",
-          `${config.repo.owner}/${config.repo.name}`,
-          "--base",
-          config.repo.base,
-        ],
-        { env: ghEnv(), maxBuffer: 32 * 1024 * 1024 },
-      );
+      const args = [
+        "agent-task",
+        "create",
+        "--from-file",
+        planFile,
+        "--repo",
+        `${config.repo.owner}/${config.repo.name}`,
+        "--base",
+        config.repo.base,
+      ];
+      const selectedModel = opts.model === undefined ? config.executeModel : opts.model;
+      if (selectedModel) args.push("--model", selectedModel);
+
+      const { stdout, stderr } = await run("gh", args, { env: ghEnv(), maxBuffer: 32 * 1024 * 1024 });
 
       const parsed = parseAgentTaskOutput(`${stdout}\n${stderr}`);
 

@@ -100,7 +100,7 @@ export function getCurrentPlanMarkdown(planId: number): string | null {
 export function schedulePlanJob(
   planId: number,
   issueNumber: number,
-  opts: { feedback?: string } = {},
+  opts: { feedback?: string; model?: string | null } = {},
 ): void {
   const jobInfo = db
     .prepare(`INSERT INTO jobs (plan_id, type, status) VALUES (?, 'plan', 'queued')`)
@@ -124,7 +124,11 @@ export function schedulePlanJob(
         previousPlan = prev?.markdown;
       }
 
-      const result = await generatePlan(issue, { feedback: opts.feedback, previousPlan });
+      const result = await generatePlan(issue, {
+        feedback: opts.feedback,
+        previousPlan,
+        model: opts.model,
+      });
 
       const versionNo = nextVersionNo(planId);
       const source = opts.feedback ? "regenerated" : "generated";

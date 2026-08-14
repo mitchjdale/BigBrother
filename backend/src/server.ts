@@ -16,6 +16,16 @@ import { scheduleExecuteJob, refreshExecution } from "./execute.js";
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
+function parseModel(body: unknown): { model: string | null | undefined; error: string | null } {
+  if (!body || typeof body !== "object") return { model: undefined, error: null };
+  if (!Object.hasOwn(body, "model")) return { model: undefined, error: null };
+  const model = (body as { model?: unknown }).model;
+  if (model == null) return { model: null, error: null };
+  if (typeof model !== "string") return { model: undefined, error: "model must be a string or null" };
+  const trimmed = model.trim();
+  return { model: trimmed || null, error: null };
+}
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true, repo: `${config.repo.owner}/${config.repo.name}`, hasToken: !!config.ghToken });
 });
@@ -49,11 +59,13 @@ app.get("/issues/:number/plan", (req, res) => {
 app.post("/issues/:number/plan", async (req, res) => {
   const issueNumber = Number(req.params.number);
   if (!Number.isInteger(issueNumber)) return res.status(400).json({ error: "invalid issue number" });
+  const parsedModel = parseModel(req.body);
+  if (parsedModel.error) return res.status(400).json({ error: parsedModel.error });
 
   try {
     const issue = await getIssue(issueNumber);
     const planId = createPlanRecord(issue.number, issue.title);
-    schedulePlanJob(planId, issue.number);
+    schedulePlanJob(planId, issue.number, { model: parsedModel.model });
     res.status(202).json({ planId, status: "planning" });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
@@ -65,13 +77,15 @@ app.post("/plans/:id/regenerate", (req, res) => {
   const planId = Number(req.params.id);
   const feedback = String(req.body?.feedback ?? "").trim();
   if (!feedback) return res.status(400).json({ error: "feedback is required" });
+  const parsedModel = parseModel(req.body);
+  if (parsedModel.error) return res.status(400).json({ error: parsedModel.error });
 
   const plan = db.prepare(`SELECT issue_number FROM plans WHERE id=?`).get(planId) as
     | { issue_number: number }
     | undefined;
   if (!plan) return res.status(404).json({ error: "plan not found" });
 
-  schedulePlanJob(planId, plan.issue_number, { feedback });
+  schedulePlanJob(planId, plan.issue_number, { feedback, model: parsedModel.model });
   res.status(202).json({ planId, status: "planning" });
 });
 
@@ -95,6 +109,8 @@ app.patch("/plans/:id/version", (req, res) => {
 // --- M4: approve → execute → draft PR via the Copilot cloud agent ---
 app.post("/plans/:id/execute", (req, res) => {
   const planId = Number(req.params.id);
+  const parsedModel = parseModel(req.body);
+  if (parsedModel.error) return res.status(400).json({ error: parsedModel.error });
   const plan = db.prepare(`SELECT status FROM plans WHERE id=?`).get(planId) as
     | { status: string }
     | undefined;
@@ -105,7 +121,7 @@ app.post("/plans/:id/execute", (req, res) => {
   const markdown = getCurrentPlanMarkdown(planId);
   if (!markdown) return res.status(409).json({ error: "no plan version to execute" });
 
-  scheduleExecuteJob(planId, markdown);
+  scheduleExecuteJob(planId, markdown, { model: parsedModel.model });
   res.status(202).json({ planId, status: "executing" });
 });
 

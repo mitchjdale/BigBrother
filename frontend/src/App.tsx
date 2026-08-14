@@ -10,6 +10,18 @@ interface PlanRef {
   status: PlanStatus;
 }
 
+const MODEL_OPTIONS = [
+  { label: "Copilot default (auto)", value: "" },
+  { label: "GPT-5.5", value: "gpt-5.5" },
+  { label: "GPT-5.3-Codex", value: "gpt-5.3-codex" },
+  { label: "GPT-5 mini", value: "gpt-5-mini" },
+  { label: "Claude Sonnet 5", value: "claude-sonnet-5" },
+  { label: "Claude Sonnet 4.5", value: "claude-sonnet-4.5" },
+  { label: "Claude Opus 4.8", value: "claude-opus-4.8" },
+  { label: "Claude Haiku 4.5", value: "claude-haiku-4.5" },
+  { label: "Gemini 3.1 Pro Preview", value: "gemini-3.1-pro-preview" },
+];
+
 export default function App() {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,6 +29,8 @@ export default function App() {
   const [plans, setPlans] = useState<Record<number, PlanRef>>({});
   const [creating, setCreating] = useState<Record<number, boolean>>({});
   const [selected, setSelected] = useState<number | null>(null);
+  const [planningModel, setPlanningModel] = useState<string | null>(null);
+  const [executionModel, setExecutionModel] = useState<string | null>(null);
   const pollers = useRef<Record<number, number>>({});
 
   const loadIssues = useCallback(async () => {
@@ -79,7 +93,7 @@ export default function App() {
   const createPlan = async (issue: Issue) => {
     setCreating((c) => ({ ...c, [issue.number]: true }));
     try {
-      const { planId, status } = await api.createPlan(issue.number);
+      const { planId, status } = await api.createPlan(issue.number, planningModel);
       setPlans((prev) => ({ ...prev, [issue.number]: { planId, status } }));
       setSelected(issue.number);
       trackPlan(issue.number, planId);
@@ -99,9 +113,39 @@ export default function App() {
           <h1 className="text-xl font-bold">BigBrother</h1>
           <p className="text-sm text-muted-foreground">AI implementation planning for your tickets</p>
         </div>
-        <Button variant="outline" size="sm" onClick={loadIssues}>
-          <RefreshCw className="h-4 w-4" /> Refresh issues
-        </Button>
+        <div className="flex items-end gap-3">
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Planning model
+            <select
+              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
+              value={planningModel ?? ""}
+              onChange={(e) => setPlanningModel(e.target.value || null)}
+            >
+              {MODEL_OPTIONS.map((m) => (
+                <option key={m.value || "auto-plan"} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Execution model
+            <select
+              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
+              value={executionModel ?? ""}
+              onChange={(e) => setExecutionModel(e.target.value || null)}
+            >
+              {MODEL_OPTIONS.map((m) => (
+                <option key={m.value || "auto-exec"} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button variant="outline" size="sm" onClick={loadIssues}>
+            <RefreshCw className="h-4 w-4" /> Refresh issues
+          </Button>
+        </div>
       </header>
 
       <div className="grid flex-1 grid-cols-[minmax(320px,420px)_1fr] overflow-hidden">
@@ -138,7 +182,12 @@ export default function App() {
 
         <main className="overflow-auto p-6">
           {selectedPlanId ? (
-            <PlanPanel key={selectedPlanId} planId={selectedPlanId} />
+            <PlanPanel
+              key={selectedPlanId}
+              planId={selectedPlanId}
+              planningModel={planningModel}
+              executionModel={executionModel}
+            />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
               <Eye className="h-8 w-8" />

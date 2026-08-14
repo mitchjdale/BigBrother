@@ -11,7 +11,13 @@ import { ExternalLink, Loader2, Pencil, RefreshCw, Rocket, Save, X } from "lucid
 
 const POLL_MS = 2500;
 
-export function PlanPanel({ planId }: { planId: number }) {
+interface Props {
+  planId: number;
+  planningModel: string | null;
+  executionModel: string | null;
+}
+
+export function PlanPanel({ planId, planningModel, executionModel }: Props) {
   const [plan, setPlan] = useState<PlanView | null>(null);
   const [feedback, setFeedback] = useState("");
   const [editing, setEditing] = useState(false);
@@ -49,7 +55,7 @@ export function PlanPanel({ planId }: { planId: number }) {
     if (!feedback.trim()) return;
     setBusy(true);
     try {
-      await api.regenerate(planId, feedback.trim());
+      await api.regenerate(planId, feedback.trim(), planningModel);
       setFeedback("");
       await refresh();
       poll();
@@ -72,7 +78,7 @@ export function PlanPanel({ planId }: { planId: number }) {
   const doExecute = async () => {
     setBusy(true);
     try {
-      await api.execute(planId);
+      await api.execute(planId, executionModel);
       await refresh();
       poll();
     } catch (e) {

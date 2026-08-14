@@ -74,7 +74,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173, pick an issue, and press **Create plan**.
+Open http://localhost:5173, choose planning/execution models (or leave **Copilot default (auto)**), pick an issue, and press **Create plan**.
 
 ## User flow
 
