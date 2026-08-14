@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { config } from "./config.js";
+import { cloneUrl, copilotEnv } from "./auth.js";
 import type { Issue, Usage } from "./types.js";
 import { captureUsageByCwd } from "./usage.js";
 
@@ -64,11 +65,9 @@ export async function generatePlan(
   const startedAt = new Date().toISOString();
 
   try {
-    const cloneUrl = config.ghToken
-      ? `https://x-access-token:${config.ghToken}@github.com/${config.repo.owner}/${config.repo.name}.git`
-      : `https://github.com/${config.repo.owner}/${config.repo.name}.git`;
+    const url = cloneUrl(config.repo.owner, config.repo.name);
 
-    await run("git", ["clone", "--depth", "1", "--branch", config.repo.base, cloneUrl, cwd], {
+    await run("git", ["clone", "--depth", "1", "--branch", config.repo.base, url, cwd], {
       maxBuffer: 64 * 1024 * 1024,
     });
 
@@ -86,13 +85,7 @@ export async function generatePlan(
     const { stdout } = await run("copilot", args, {
       cwd,
       maxBuffer: 64 * 1024 * 1024,
-      env: {
-        ...process.env,
-        GH_TOKEN: config.ghToken,
-        GITHUB_TOKEN: config.ghToken,
-        // Never open a pager / interactive UI.
-        COPILOT_DISABLE_UPDATE_CHECK: "1",
-      },
+      env: copilotEnv(),
     });
 
     const usage = captureUsageByCwd(cwd, startedAt);

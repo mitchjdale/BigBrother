@@ -31,10 +31,38 @@ Copilot local session store, then summing `assistant_usage_events` (input/output
 ## Setup
 
 ```bash
-cp .env.example .env      # GH_TOKEN falls back to `gh auth token` if left blank
+cp .env.example .env      # GH_TOKEN is optional; see Authentication below
 npm install
 npm run dev               # or: npm run build && npm start
 ```
+
+## Authentication
+
+BigBrother touches GitHub through three tools that each accept **different**
+credential kinds, so it routes (or withholds) tokens per operation instead of
+forcing a single `GH_TOKEN` everywhere (see `src/auth.ts`):
+
+| Operation | Tool | Accepts | What BigBrother does |
+|---|---|---|---|
+| List/read issues | Octokit (REST) | any token | uses `GH_TOKEN` / `gh auth token` |
+| Clone repo | `git clone` | none for public repos | anonymous clone unless `REPO_PRIVATE=true` |
+| Generate plan | Copilot CLI | fine-grained PAT or OAuth (**not** classic `ghp_`) | passes token only if fine-grained/OAuth; otherwise strips it so the CLI uses `copilot /login` |
+| Execute plan | `gh agent-task` | **OAuth only** | strips non-OAuth `GH_TOKEN` so gh uses your `gh auth login` (browser/OAuth) keyring |
+
+Token kinds are detected by prefix: `ghp_` = classic PAT, `github_pat_` =
+fine-grained PAT, `gho_`/`ghu_`/`ghs_` = OAuth.
+
+**Recommended one-time setup for each developer:**
+
+```bash
+gh auth login        # choose "Login with a web browser" → yields an OAuth token (required for execute)
+copilot /login       # authenticates the Copilot CLI for planning
+```
+
+With that, you can leave `GH_TOKEN` blank. Set `GH_TOKEN` only if you want a
+specific token for the REST API (e.g. a classic PAT for higher rate limits) —
+it will **not** break planning or execution, because non-OAuth/classic tokens
+are stripped before those subprocesses run.
 
 ## Endpoints
 
@@ -61,6 +89,7 @@ npm run dev               # or: npm run build && npm start
 ```
 src/
   config.ts    env loading; resolves GH_TOKEN (falls back to `gh auth token`)
+  auth.ts      per-tool credential routing (token-kind detection, clone URL, subprocess env)
   db.ts        better-sqlite3 schema init (plans / plan_versions / jobs / prs)
   github.ts    Octokit — list & get issues
   queue.ts     p-queue — enqueue on click, run plans concurrently
@@ -85,8 +114,9 @@ src/
 
 | Var | Default | Purpose |
 |---|---|---|
-| `GH_TOKEN` | `gh auth token` | GitHub token (Copilot Business) for Octokit + clone + agent |
+| `GH_TOKEN` | `gh auth token` | GitHub REST token (issues). Any kind works; non-OAuth tokens are stripped before Copilot planning/execute (see Authentication) |
 | `REPO_OWNER` / `REPO_NAME` / `REPO_BASE` | `mitchjdale` / `WealthOlympics` / `main` | target repo |
+| `REPO_PRIVATE` | `false` | `true` embeds `GH_TOKEN` in the clone URL; public repos clone anonymously |
 | `PORT` | `8787` | API port |
 | `PLAN_CONCURRENCY` | `5` | how many plan/execute jobs run in parallel |
 | `WORK_DIR` | `./.work` | per-job clone dir (unique subdir, deleted after) |
@@ -97,4 +127,6 @@ src/
 
 ## Requirements
 - Node ≥ 20, `git`, and the `copilot` + `gh` CLIs on PATH.
-- A GitHub account with **Copilot Business** (token via `GH_TOKEN` or `gh auth`).
+- A GitHub account with **Copilot Business**.
+- `gh auth login` via **web browser (OAuth)** — required for plan execution (`gh agent-task`).
+- `copilot /login` — authenticates the Copilot CLI for planning.
