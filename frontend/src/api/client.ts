@@ -96,7 +96,7 @@ export interface PlanView {
 
 export type UsageGranularity = "day" | "week";
 
-export interface PhaseTotals {
+export interface UsageTotals {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
@@ -104,34 +104,15 @@ export interface PhaseTotals {
   usd: number | null;
   estimatedUsd: number;
   attempts: number;
-  failedAttempts: number;
 }
 
-export interface UsageBucket {
+export interface UsageBucket extends UsageTotals {
   bucket: string;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  aiu: number;
-  usd: number | null;
-  estimatedUsd: number;
-  attempts: number;
-  planning: PhaseTotals;
-  implementation: PhaseTotals;
 }
 
-export interface RepoUsage {
+export interface RepoUsage extends UsageTotals {
   owner: string;
   name: string;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  aiu: number;
-  usd: number | null;
-  estimatedUsd: number;
-  attempts: number;
-  planning: PhaseTotals;
-  implementation: PhaseTotals;
 }
 
 export interface UsageReport {
@@ -139,19 +120,10 @@ export interface UsageReport {
   from: string | null;
   to: string | null;
   usdPerAiu: number;
-  summary: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    aiu: number;
-    usd: number | null;
-    estimatedUsd: number;
-    attempts: number;
+  summary: UsageTotals & {
     failedAttempts: number;
     plans: number;
     repos: number;
-    planning: PhaseTotals;
-    implementation: PhaseTotals;
   };
   series: UsageBucket[];
   repos: RepoUsage[];
