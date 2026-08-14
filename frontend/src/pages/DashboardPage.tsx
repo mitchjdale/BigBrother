@@ -18,6 +18,7 @@ import { Eye, Loader2, RefreshCw } from "lucide-react";
 interface PlanRef {
   planId: number;
   status: PlanStatus;
+  estimatedUsd?: number;
 }
 
 const MODEL_OPTIONS = [
@@ -52,6 +53,10 @@ export default function DashboardPage({ source, setSource }: Props) {
   );
   const [selectedOwner, setSelectedOwner] = usePersistentState("bb.dashboard.owner", "");
   const [selectedRepoName, setSelectedRepoName] = usePersistentState("bb.dashboard.repo", "");
+  const [issueState, setIssueState] = usePersistentState<"open" | "closed">(
+    "bb.dashboard.issueState",
+    "open",
+  );
   const [loadingRepos, setLoadingRepos] = useState(
     () => readCache<{ repos: RepoRef[] }>("bb.cache.repos") == null,
   );
@@ -116,7 +121,7 @@ export default function DashboardPage({ source, setSource }: Props) {
       setLoading(false);
       return;
     }
-    const cacheKey = `bb.cache.issues:${ctxId}`;
+    const cacheKey = `bb.cache.issues:${ctxId}:${issueState}`;
     const cached = readCache<Issue[]>(cacheKey);
     if (cached) {
       setIssues(cached);
@@ -125,7 +130,7 @@ export default function DashboardPage({ source, setSource }: Props) {
       setLoading(true);
     }
     try {
-      const fresh = await api.listIssues(ctx);
+      const fresh = await api.listIssues(ctx, issueState);
       setIssues(fresh);
       writeCache(cacheKey, fresh);
       setError(null);
@@ -135,7 +140,7 @@ export default function DashboardPage({ source, setSource }: Props) {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctxId]);
+  }, [ctxId, issueState]);
 
   useEffect(() => {
     return () => clearPollers();
@@ -145,16 +150,20 @@ export default function DashboardPage({ source, setSource }: Props) {
     if (pollers.current[issueKey]) window.clearInterval(pollers.current[issueKey]);
     pollers.current[issueKey] = window.setInterval(async () => {
       try {
+        await api.refreshExecution(planId).catch(() => null);
         const p = await api.getPlan(planId);
-        setPlans((prev) => ({ ...prev, [issueKey]: { planId, status: p.status } }));
-        if (p.status !== "planning" && p.status !== "executing") {
+        setPlans((prev) => ({
+          ...prev,
+          [issueKey]: { planId, status: p.status, estimatedUsd: p.totalCost.estimatedUsd },
+        }));
+        if (p.status !== "planning" && p.status !== "executing" && p.status !== "pr_open") {
           window.clearInterval(pollers.current[issueKey]);
           delete pollers.current[issueKey];
         }
       } catch {
         /* keep polling */
       }
-    }, 2500);
+    }, 15000);
   }, []);
 
   // One-time load: sources, repos, and JIRA mappings.
@@ -242,8 +251,10 @@ export default function DashboardPage({ source, setSource }: Props) {
         if (!active) return;
         const map: Record<string, PlanRef> = {};
         for (const p of existing) {
-          map[p.issueKey] = { planId: p.planId, status: p.status };
-          if (p.status === "planning" || p.status === "executing") trackPlan(p.issueKey, p.planId);
+          map[p.issueKey] = { planId: p.planId, status: p.status, estimatedUsd: p.estimatedUsd };
+          if (p.status === "planning" || p.status === "executing" || p.status === "pr_open") {
+            trackPlan(p.issueKey, p.planId);
+          }
         }
         writeCache(`bb.cache.plans:${ctxId}`, map);
         setPlans((prev) => ({ ...map, ...prev }));
@@ -272,8 +283,32 @@ export default function DashboardPage({ source, setSource }: Props) {
     }
   };
 
+  const clearPlan = async (issue: Issue) => {
+    if (!ctx || !ctxId) return;
+    const ref = plans[issue.key];
+    if (!ref) return;
+    if (pollers.current[issue.key]) {
+      window.clearInterval(pollers.current[issue.key]);
+      delete pollers.current[issue.key];
+    }
+    try {
+      await api.deletePlan(ref.planId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setPlans((prev) => {
+      const next = { ...prev };
+      delete next[issue.key];
+      writeCache(`bb.cache.plans:${ctxId}`, next);
+      return next;
+    });
+    if (selected === issue.key) setSelected(null);
+  };
+
   const selectedPlanId = selected != null ? plans[selected]?.planId : undefined;
   const selectedIssue = selected != null ? issues.find((i) => i.key === selected) ?? null : null;
+  const visibleIssues = issues;
 
   const contextLabel =
     source === "github"
@@ -283,6 +318,11 @@ export default function DashboardPage({ source, setSource }: Props) {
       : selectedMapping
         ? `${selectedMapping.projectKey}`
         : null;
+
+  useEffect(() => {
+    if (!ctxId) return;
+    writeCache(`bb.cache.plans:${ctxId}`, plans);
+  }, [plans, ctxId]);
 
   useEffect(() => {
     const issueTitle = selectedIssue?.title;
@@ -353,6 +393,17 @@ export default function DashboardPage({ source, setSource }: Props) {
           )}
 
           <label className="grid gap-1 text-xs text-muted-foreground">
+            Issue state
+            <select
+              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
+              value={issueState}
+              onChange={(e) => setIssueState((e.target.value as "open" | "closed") ?? "open")}
+            >
+              <option value="open">Open</option>
+              <option value="closed">Closed</option>
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
             Planning model
             <select
               className={selectClass}
@@ -406,7 +457,7 @@ export default function DashboardPage({ source, setSource }: Props) {
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(320px,420px)_1fr] overflow-hidden">
         <aside className="flex flex-col overflow-hidden border-r">
           <div className="border-b px-4 py-2 text-sm font-medium text-muted-foreground">
-            Open issues {issues.length > 0 && `(${issues.length})`}
+            {issueState === "open" ? "Open" : "Closed"} issues {issues.length > 0 && `(${issues.length})`}
           </div>
           <div className="flex-1 space-y-2 overflow-auto p-3">
             {source === "jira" && mappings.length === 0 && !loadingRepos ? (
@@ -420,21 +471,26 @@ export default function DashboardPage({ source, setSource }: Props) {
               </div>
             ) : error ? (
               <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
-            ) : issues.length === 0 ? (
+            ) : visibleIssues.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground">
                 {loadingRepos
                   ? "Loading…"
-                  : `No open issues found for ${contextLabel ?? "the selected source"}.`}
+                  : issueState === "open"
+                    ? `No open issues found for ${contextLabel ?? "the selected source"}.`
+                    : `No closed issues you've worked on for ${contextLabel ?? "the selected source"}.`}
               </div>
             ) : (
-              issues.map((issue) => (
+              visibleIssues.map((issue) => (
                 <IssueCard
                   key={issue.key}
                   issue={issue}
                   status={plans[issue.key]?.status}
+                  estimatedUsd={plans[issue.key]?.estimatedUsd}
                   selected={selected === issue.key}
                   busy={!!creating[issue.key]}
+                  hasPlan={!!plans[issue.key]}
                   onCreatePlan={() => createPlan(issue)}
+                  onClearPlan={() => clearPlan(issue)}
                   onSelect={() => setSelected(issue.key)}
                 />
               ))
@@ -453,6 +509,18 @@ export default function DashboardPage({ source, setSource }: Props) {
                     planId={selectedPlanId}
                     planningModel={planningModel}
                     executionModel={executionModel}
+                    onStatusChange={(status) => {
+                      if (selected == null || selectedPlanId == null) return;
+                      setPlans((prev) => ({
+                        ...prev,
+                        [selected]: {
+                          ...prev[selected],
+                          planId: selectedPlanId,
+                          status,
+                        },
+                      }));
+                      if (status === "pr_open") void loadIssues();
+                    }}
                   />
                 </div>
               ) : (

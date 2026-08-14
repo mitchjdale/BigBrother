@@ -30,7 +30,8 @@ POST /issues/:n/plan ──▶ queue (concurrent) ──▶ plan worker:
 GET /plans/:id ──▶ status + plan markdown + per-version & total cost + PR
 
 POST /plans/:id/execute ──▶ execute worker:
-    gh agent-task create -F <approved plan>  ──▶ draft PR  ──▶ status = pr_open
+    gh agent-task create -F <approved plan>  ──▶ draft PR
+    (best-effort request Copilot PR review)   ──▶ status = pr_open
 ```
 
 Planning is **read-only**: the `write`, `git commit`, `git push`, `rm`, `mv` tools are
@@ -47,6 +48,13 @@ report and the dedicated usage page split every total, time bucket and per-repo 
 **planning** vs **implementation** so the two can be compared. Note: the implementation
 phase runs on the Copilot cloud coding agent (`gh agent-task`); its usage only appears if
 that session is recorded in the local session store, otherwise it reports as zero.
+
+Cost is also translated to a rough **dollar estimate** (#19). `pricing.ts` holds an
+approximate USD-per-1M-token price list keyed by model (overridable via `MODEL_PRICING`),
+so `estimatedUsd = input×rate_in + output×rate_out` per attempt. Estimates are summed
+(model-aware) into the plan view (`totalCost.estimatedUsd`), the `/usage` report, and a
+per-issue total surfaced by `/plans` — the dashboard shows that as a small cost badge on
+each ticket. These figures are deliberately rough ball-parks for comparison, not billing.
 
 ## Setup
 
@@ -95,8 +103,8 @@ are stripped before those subprocesses run.
 | GET  | `/mappings` | list JIRA project → GitHub repo mappings |
 | POST | `/mappings` | create/replace a mapping (`{ projectKey, projectName, repoOwner, repoName, repoBase }`) |
 | DELETE | `/mappings/:id` | delete a mapping |
-| GET  | `/repos/issues` | list open issues for the selected source (`?source=github&repo…` or `?source=jira&project=KEY`) (M1) |
-| GET  | `/plans` | latest plan per issue for a source/context (dashboard hydration after reload) |
+| GET  | `/repos/issues` | list issues for the selected source (`?source=github&repo…&state=open\|closed` or `?source=jira&project=KEY`); closed returns only GitHub issues with plan records in this DB (M1) |
+| GET  | `/plans` | latest plan per issue + per-issue `estimatedUsd` for the ticket cost badge (dashboard hydration) (#19) |
 | GET  | `/issues/:source/:key/plan` | latest persisted plan for an issue (404 if none) |
 | POST | `/issues/:source/:key/plan` | enqueue a plan (`{ model?, repo… \| project }`) → `{ planId }` (202). Reuses the issue's existing plan record so token usage accumulates (#11) |
 | POST | `/plans/:id/retry` | re-run a failed/completed plan in-place (`{ model?: string\|null }`), retaining prior token usage (#11) |
@@ -105,7 +113,11 @@ are stripped before those subprocesses run.
 | PATCH | `/plans/:id/version` | `{ markdown }` → developer-edited version (M3) |
 | POST | `/plans/:id/execute` | approve (`{ model?: string|null }`) → Copilot cloud agent → draft PR (M4) |
 | POST | `/plans/:id/refresh-execution` | re-poll agent task for the draft PR / state; also re-captures implementation token usage (M4, #18) |
+| POST | `/plans/:id/review` | request (or re-request) Copilot code review on the latest draft PR for this plan |
 | GET  | `/usage` | aggregated planning + implementation token/AIU usage split by phase, with time series + per-repo breakdown (optional `repoOwner`/`repoName`/`from`/`to`/`granularity`) (#18) |
+
+`/plans/:id/review` (and the automatic review request during execute/refresh) is best-effort: it requires
+repo permission to request PR reviewers plus Copilot code review enabled for the repo/org.
 
 ## Not in this milestone
 - Playwright screenshot on the PR — **M5**
@@ -129,6 +141,7 @@ src/
   copilot.ts   clone repo + run read-only Copilot CLI plan; capture markdown + cost
   usage.ts     cost adapter — sum a session's tokens/AIU from ~/.copilot/session-store.db
                (by cwd for planning, by session ref for implementation #18)
+  pricing.ts   rough per-model USD price list + token→dollar estimate helpers (#19)
   planner.ts   plan job orchestration, versions, edit, plan view (status + cost + PR)
   execute.ts   execute queue — gh agent-task, output parser, PR refresh
   server.ts    Express routes
@@ -142,7 +155,7 @@ src/
 | `plans` | one row per issue plan: `issue_source` (github/jira), `issue_key` (stable id: GH number or JIRA key), `issue_number` (GH only), `status` (idle/planning/ready/executing/pr_open/failed), `current_version_id`, `error` |
 | `plan_versions` | each plan revision: `markdown`, `source` (generated/regenerated/user_edited), `feedback_prompt`, `input_tokens`, `output_tokens`, `nano_aiu`, `model`, `duration_ms` |
 | `jobs` | queued/running plan & execute jobs: `type`, `status`, `session_id`, `error`, plus per-attempt cost (`input_tokens`, `output_tokens`, `nano_aiu`, `model`, `duration_ms`). Cumulative plan cost is summed from these so failed/superseded attempts are retained (#11) |
-| `prs` | execution result: `session_ref`, `pr_number`, `url`, `branch`, `agent_state`, `screenshot_url` |
+| `prs` | execution result: `session_ref`, `pr_number`, `url`, `branch`, `agent_state`, review status/error (`review_state`, `review_error`), `screenshot_url` |
 | `jira_project_map` | JIRA project → GitHub repo mapping (`project_key`, `project_name`, `repo_owner`, `repo_name`, `repo_base`) used to clone + open the PR for JIRA-sourced plans |
 
 ## Environment variables (`.env`)
@@ -157,8 +170,10 @@ src/
 | `WORK_DIR` | `./.work` | per-job clone dir (unique subdir, deleted after) |
 | `PLAN_MODEL` | *(auto)* | pin a Copilot model for planning |
 | `EXECUTE_MODEL` | *(auto)* | pin a Copilot model for execution |
+| `COPILOT_REVIEW` | `true` | when `true`, automatically request `copilot-pull-request-reviewer[bot]` on newly discovered draft PRs (best-effort) |
 | `COPILOT_SESSION_STORE` | `~/.copilot/session-store.db` | CLI usage store for cost capture |
 | `USD_PER_AIU` | `0` | USD per AI Unit for a dollar figure (0 = report AIU/tokens only) |
+| `MODEL_PRICING` | *(built-in)* | JSON overriding the rough per-model USD/1M-token rates used for cost estimates (#19) |
 | `SQLITE_PATH` | `./data/bigbrother.db` | app database file |
 | `JIRA_BASE_URL` | *(empty)* | JIRA Cloud site, e.g. `https://your-domain.atlassian.net`. Enables the JIRA source when set with email + token |
 | `JIRA_EMAIL` | *(empty)* | Atlassian account email for JIRA Basic auth |

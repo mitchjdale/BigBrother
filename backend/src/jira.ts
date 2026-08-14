@@ -78,6 +78,7 @@ function mapIssue(raw: JiraIssueRaw): Issue {
     title: f.summary ?? raw.key,
     body: body || null,
     state: f.status?.statusCategory?.key ?? "",
+    state_reason: null,
     url: issueUrl(raw.key),
     labels: f.labels ?? [],
     issueType: f.issuetype?.name ?? null,

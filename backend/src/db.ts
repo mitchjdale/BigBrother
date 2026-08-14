@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS prs (
   url TEXT,
   branch TEXT,
   agent_state TEXT,
+  review_state TEXT,
+  review_error TEXT,
   screenshot_url TEXT,
   raw_output TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -92,6 +94,8 @@ ensureColumn("jobs", "output_tokens", "output_tokens INTEGER NOT NULL DEFAULT 0"
 ensureColumn("jobs", "nano_aiu", "nano_aiu INTEGER NOT NULL DEFAULT 0");
 ensureColumn("jobs", "model", "model TEXT");
 ensureColumn("jobs", "duration_ms", "duration_ms INTEGER NOT NULL DEFAULT 0");
+ensureColumn("prs", "review_state", "review_state TEXT");
+ensureColumn("prs", "review_error", "review_error TEXT");
 
 // --- Multi-source issues (GitHub Issues + JIRA) ---
 // Issues can now come from GitHub (integer number) or JIRA (string key like

@@ -7,6 +7,7 @@ export interface Issue {
   title: string;
   body: string | null;
   state: string;
+  state_reason: string | null;
   url: string;
   labels: string[];
   issueType?: string | null;
@@ -43,6 +44,7 @@ export interface Cost {
   outputTokens: number;
   aiu: number;
   usd: number | null;
+  estimatedUsd?: number;
   model?: string | null;
   durationMs?: number;
 }
@@ -57,7 +59,7 @@ export interface PlanVersionMeta {
   createdAt: string;
 }
 
-export type PlanStatus = "idle" | "planning" | "ready" | "executing" | "pr_open" | "failed";
+export type PlanStatus = "idle" | "planning" | "ready" | "executing" | "pr_open" | "completed" | "failed";
 export interface PlanView {
   id: number;
   issueNumber: number | null;
@@ -70,6 +72,7 @@ export interface PlanView {
     url: string | null;
     branch: string | null;
     agentState: string | null;
+    reviewState: string | null;
     screenshotUrl: string | null;
   } | null;
   currentPlan: {
@@ -83,6 +86,7 @@ export interface PlanView {
     outputTokens: number;
     aiu: number;
     usd: number | null;
+    estimatedUsd: number;
     versions: number;
     attempts: number;
     failedAttempts: number;
@@ -98,6 +102,7 @@ export interface PhaseTotals {
   totalTokens: number;
   aiu: number;
   usd: number | null;
+  estimatedUsd: number;
   attempts: number;
   failedAttempts: number;
 }
@@ -109,6 +114,7 @@ export interface UsageBucket {
   totalTokens: number;
   aiu: number;
   usd: number | null;
+  estimatedUsd: number;
   attempts: number;
   planning: PhaseTotals;
   implementation: PhaseTotals;
@@ -122,6 +128,7 @@ export interface RepoUsage {
   totalTokens: number;
   aiu: number;
   usd: number | null;
+  estimatedUsd: number;
   attempts: number;
   planning: PhaseTotals;
   implementation: PhaseTotals;
@@ -138,6 +145,7 @@ export interface UsageReport {
     totalTokens: number;
     aiu: number;
     usd: number | null;
+    estimatedUsd: number;
     attempts: number;
     failedAttempts: number;
     plans: number;
@@ -223,12 +231,19 @@ export const api = {
       if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
     }),
 
-  listIssues: (ctx: IssueContext) =>
-    fetch(`${BASE}/repos/issues${contextQuery(ctx)}`).then(json<Issue[]>),
+  listIssues: (ctx: IssueContext, state: "open" | "closed" = "open") =>
+    fetch(`${BASE}/repos/issues${contextQuery(ctx)}&state=${state}`).then(json<Issue[]>),
 
   listPlans: (ctx: IssueContext) =>
     fetch(`${BASE}/plans${contextQuery(ctx)}`).then(
-      json<{ issueKey: string; issueNumber: number | null; source: IssueSource; planId: number; status: PlanStatus }[]>,
+      json<{
+        issueKey: string;
+        issueNumber: number | null;
+        source: IssueSource;
+        planId: number;
+        status: PlanStatus;
+        estimatedUsd: number;
+      }[]>,
     ),
 
   getIssuePlan: (ctx: IssueContext, issueKey: string) =>
@@ -247,6 +262,14 @@ export const api = {
     }).then(json<{ planId: number; status: PlanStatus }>),
 
   getPlan: (planId: number) => fetch(`${BASE}/plans/${planId}`).then(json<PlanView>),
+
+  deletePlan: (planId: number) =>
+    fetch(`${BASE}/plans/${planId}`, { method: "DELETE" }).then(async (r) => {
+      if (!r.ok && r.status !== 204) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? `HTTP ${r.status}`);
+      }
+    }),
 
   regenerate: (planId: number, feedback: string, model: string | null = null) =>
     fetch(`${BASE}/plans/${planId}/regenerate`, {
@@ -280,6 +303,9 @@ export const api = {
 
   refreshExecution: (planId: number) =>
     fetch(`${BASE}/plans/${planId}/refresh-execution`, { method: "POST" }).then(json<PlanView>),
+
+  requestReview: (planId: number) =>
+    fetch(`${BASE}/plans/${planId}/review`, { method: "POST" }).then(json<PlanView>),
 
   getUsage: (params: UsageParams = {}) => {
     const qs = new URLSearchParams();

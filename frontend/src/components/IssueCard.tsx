@@ -3,19 +3,39 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "./StatusBadge";
 import type { Issue, PlanStatus } from "@/api/client";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Coins, X } from "lucide-react";
 
 interface Props {
   issue: Issue;
   status?: PlanStatus;
+  estimatedUsd?: number;
   selected: boolean;
   busy: boolean;
+  hasPlan: boolean;
   onCreatePlan: () => void;
+  onClearPlan: () => void;
   onSelect: () => void;
 }
 
-export function IssueCard({ issue, status, selected, busy, onCreatePlan, onSelect }: Props) {
+function fmtUsd(usd: number): string {
+  if (usd > 0 && usd < 0.01) return "<$0.01";
+  return `$${usd.toFixed(2)}`;
+}
+
+export function IssueCard({
+  issue,
+  status,
+  estimatedUsd,
+  selected,
+  busy,
+  hasPlan,
+  onCreatePlan,
+  onClearPlan,
+  onSelect,
+}: Props) {
   const ref = issue.source === "github" ? `#${issue.number}` : issue.key;
+  const isClosed = issue.state === "closed";
+
   return (
     <Card
       className={selected ? "ring-2 ring-ring cursor-pointer" : "cursor-pointer hover:bg-accent/40"}
@@ -26,6 +46,16 @@ export function IssueCard({ issue, status, selected, busy, onCreatePlan, onSelec
           <CardTitle className="text-sm">
             <span className="text-muted-foreground">{ref}</span> {issue.title}
           </CardTitle>
+          {estimatedUsd != null && estimatedUsd > 0 && (
+            <Badge
+              variant="secondary"
+              className="shrink-0 gap-1 tabular-nums"
+              title="Estimated cost for this ticket (planning + implementation)"
+            >
+              <Coins className="h-3 w-3" />
+              {fmtUsd(estimatedUsd)}
+            </Badge>
+          )}
         </div>
       </CardHeader>
       <CardContent className="flex items-end justify-between gap-2">
@@ -48,22 +78,51 @@ export function IssueCard({ issue, status, selected, busy, onCreatePlan, onSelec
             ))}
           </div>
           {status && <StatusBadge status={status} />}
-        </div>
-        <Button
-          size="sm"
-          disabled={busy || status === "planning"}
-          onClick={(e) => {
-            e.stopPropagation();
-            onCreatePlan();
-          }}
-        >
-          {busy || status === "planning" ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Sparkles className="h-4 w-4" />
+          {isClosed && (
+            <Badge variant="secondary" className="text-[10px]">
+              Closed
+            </Badge>
           )}
-          Create plan
-        </Button>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          {estimatedUsd != null && estimatedUsd > 0 && (
+            <span
+              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground tabular-nums"
+              title="Estimated cost for this ticket (planning + implementation)"
+            >
+              <Coins className="h-3.5 w-3.5" />
+              {fmtUsd(estimatedUsd)} est.
+            </span>
+          )}
+          {hasPlan ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || status === "planning" || status === "executing"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClearPlan();
+              }}
+            >
+              <X className="h-4 w-4" />
+              Clear plan
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              disabled={busy || status === "planning" || isClosed}
+              onClick={(e) => {
+                e.stopPropagation();
+                onCreatePlan();
+              }}
+            >
+              {(busy || status === "planning") && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              {isClosed ? "Issue closed" : "Create plan"}
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

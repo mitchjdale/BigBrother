@@ -4,6 +4,7 @@ export type PlanStatus =
   | "ready"
   | "executing"
   | "pr_open"
+  | "completed"
   | "failed";
 
 export type JobType = "plan" | "execute";
@@ -21,6 +22,7 @@ export interface Issue {
   title: string;
   body: string | null;
   state: string;
+  state_reason: string | null;
   url: string;
   labels: string[];
   /** JIRA issue type (e.g. "Story", "Bug"); null for GitHub. */

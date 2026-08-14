@@ -1,4 +1,5 @@
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { pinoHttp } from "pino-http";
 import { config, jiraConfigured } from "./config.js";
 import { db } from "./db.js";
@@ -15,13 +16,29 @@ import {
   getCurrentPlanMarkdown,
   getLatestPlanIdForIssue,
   listLatestPlansByIssue,
+  listWorkedIssueNumbers,
+  deletePlan,
 } from "./planner.js";
-import { scheduleExecuteJob, refreshExecution } from "./execute.js";
+import { scheduleExecuteJob, refreshExecution, requestReviewForPlan } from "./execute.js";
 import { getUsageReport, type Granularity } from "./reports.js";
 import type { IssueSource, RepoRef } from "./types.js";
 
 const httpLog = log("http");
 const app = express();
+const clearPlanLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "too many requests" },
+});
+const reviewRequestLimiter = rateLimit({
+  windowMs: 10_000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "review request is rate-limited; try again shortly" },
+});
 
 // Structured per-request logging (method, url, status, latency). Health checks
 // are logged at debug to keep the stream readable.
@@ -205,8 +222,17 @@ app.get("/repos/issues", async (req, res) => {
   }
   const parsedRepo = parseRepo(queryToRecord(query));
   if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
+  const stateRaw = typeof req.query.state === "string" ? req.query.state.trim().toLowerCase() : "open";
+  if (stateRaw !== "open" && stateRaw !== "closed") {
+    return res.status(400).json({ error: "state must be 'open' or 'closed'" });
+  }
   try {
-    res.json(await listIssues(parsedRepo.repo));
+    if (stateRaw === "closed") {
+      const numbers = listWorkedIssueNumbers(parsedRepo.repo);
+      if (numbers.length === 0) return res.json([]);
+      return res.json(await listIssues(parsedRepo.repo, { state: "closed", numbers }));
+    }
+    res.json(await listIssues(parsedRepo.repo, { state: "open" }));
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }
@@ -345,6 +371,20 @@ app.get("/plans/:id", (req, res) => {
   res.json(view);
 });
 
+app.delete("/plans/:id", clearPlanLimiter, (req, res) => {
+  const planId = Number(req.params.id);
+  if (!Number.isInteger(planId)) return res.status(400).json({ error: "invalid plan id" });
+  const plan = db.prepare(`SELECT status FROM plans WHERE id=?`).get(planId) as
+    | { status: string }
+    | undefined;
+  if (!plan) return res.status(404).json({ error: "plan not found" });
+  if (plan.status === "planning" || plan.status === "executing") {
+    return res.status(409).json({ error: `cannot clear while ${plan.status}` });
+  }
+  deletePlan(planId);
+  res.status(204).end();
+});
+
 // --- M3: developer edits the plan markdown → new version ---
 app.patch("/plans/:id/version", (req, res) => {
   const planId = Number(req.params.id);
@@ -378,6 +418,22 @@ app.post("/plans/:id/execute", (req, res) => {
 app.post("/plans/:id/refresh-execution", async (req, res) => {
   const planId = Number(req.params.id);
   await refreshExecution(planId);
+  const view = getPlanView(planId);
+  if (!view) return res.status(404).json({ error: "plan not found" });
+  res.json(view);
+});
+
+// --- Request (or re-request) Copilot code review on the draft PR ---
+app.post("/plans/:id/review", reviewRequestLimiter, async (req, res) => {
+  const planId = Number(req.params.id);
+  const plan = db.prepare(`SELECT id FROM plans WHERE id=?`).get(planId) as { id: number } | undefined;
+  if (!plan) return res.status(404).json({ error: "plan not found" });
+
+  const result = await requestReviewForPlan(planId, { force: true });
+  if (result === "no_pr" || result === "not_found") {
+    return res.status(409).json({ error: "no PR to review yet" });
+  }
+
   const view = getPlanView(planId);
   if (!view) return res.status(404).json({ error: "plan not found" });
   res.json(view);

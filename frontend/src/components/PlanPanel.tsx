@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "./StatusBadge";
 import { CostBar } from "./CostBar";
-import { api, type PlanView } from "@/api/client";
+import { api, type PlanStatus, type PlanView } from "@/api/client";
 import { ExternalLink, Loader2, Pencil, RefreshCw, Rocket, RotateCcw, Save, X } from "lucide-react";
 
 const POLL_MS = 2500;
@@ -15,27 +15,41 @@ interface Props {
   planId: number;
   planningModel: string | null;
   executionModel: string | null;
+  onStatusChange?: (status: PlanStatus) => void;
 }
 
-export function PlanPanel({ planId, planningModel, executionModel }: Props) {
+export function PlanPanel({ planId, planningModel, executionModel, onStatusChange }: Props) {
   const [plan, setPlan] = useState<PlanView | null>(null);
   const [feedback, setFeedback] = useState("");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lastStatus = useRef<PlanStatus | null>(null);
+
+  const applyPlan = useCallback(
+    (next: PlanView) => {
+      setPlan(next);
+      if (lastStatus.current !== next.status) {
+        lastStatus.current = next.status;
+        onStatusChange?.(next.status);
+      }
+    },
+    [onStatusChange],
+  );
 
   useEffect(() => {
     let active = true;
     let timer: number | undefined;
+    lastStatus.current = null;
 
     const tick = async () => {
       try {
-        const p = await api.getPlan(planId);
+        const p = await api.refreshExecution(planId).catch(() => api.getPlan(planId));
         if (!active) return;
-        setPlan(p);
+        applyPlan(p);
         setError(null);
-        if (p.status === "planning" || p.status === "executing") {
+        if (p.status === "planning" || p.status === "executing" || p.status === "pr_open") {
           timer = window.setTimeout(tick, POLL_MS);
         }
       } catch (e) {
@@ -47,9 +61,12 @@ export function PlanPanel({ planId, planningModel, executionModel }: Props) {
       active = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, [planId]);
+  }, [applyPlan, planId]);
 
-  const refresh = async () => setPlan(await api.getPlan(planId));
+  const refresh = async () => {
+    const next = await api.refreshExecution(planId).catch(() => api.getPlan(planId));
+    applyPlan(next);
+  };
 
   const doRegenerate = async () => {
     if (!feedback.trim()) return;
@@ -102,11 +119,26 @@ export function PlanPanel({ planId, planningModel, executionModel }: Props) {
     }
   };
 
+  const doRequestReview = async () => {
+    setBusy(true);
+    try {
+      const updated = await api.requestReview(planId);
+      setPlan(updated);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const poll = () => {
     const id = window.setInterval(async () => {
-      const p = await api.getPlan(planId);
-      setPlan(p);
-      if (p.status !== "planning" && p.status !== "executing") window.clearInterval(id);
+      const p = await api.refreshExecution(planId).catch(() => api.getPlan(planId));
+      applyPlan(p);
+      if (p.status !== "planning" && p.status !== "executing" && p.status !== "pr_open") {
+        window.clearInterval(id);
+      }
     }, POLL_MS);
   };
 
@@ -120,6 +152,7 @@ export function PlanPanel({ planId, planningModel, executionModel }: Props) {
 
   const isPlanning = plan.status === "planning";
   const canExecute = plan.status === "ready";
+  const canRequestReview = !!plan.pr?.url && plan.pr.number != null;
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -155,14 +188,23 @@ export function PlanPanel({ planId, planningModel, executionModel }: Props) {
       )}
 
       {plan.pr?.url && (
-        <a
-          href={plan.pr.url}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-        >
-          <ExternalLink className="h-4 w-4" /> Draft PR #{plan.pr.number}
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={plan.pr.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+          >
+            <ExternalLink className="h-4 w-4" /> Draft PR #{plan.pr.number}
+          </a>
+          {plan.pr.reviewState === "requested" && <Badge variant="secondary">Copilot review requested</Badge>}
+          {canRequestReview && plan.pr.reviewState !== "requested" && (
+            <Button variant="outline" size="sm" onClick={doRequestReview} disabled={busy}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Request Copilot review
+            </Button>
+          )}
+        </div>
       )}
 
       <Card className="flex-1 overflow-hidden">
