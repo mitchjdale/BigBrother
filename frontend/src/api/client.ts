@@ -3,6 +3,7 @@ export interface Issue {
   title: string;
   body: string | null;
   state: string;
+  state_reason: string | null;
   url: string;
   labels: string[];
 }
@@ -33,7 +34,7 @@ export interface PlanVersionMeta {
   createdAt: string;
 }
 
-export type PlanStatus = "idle" | "planning" | "ready" | "executing" | "pr_open" | "failed";
+export type PlanStatus = "idle" | "planning" | "ready" | "executing" | "pr_open" | "completed" | "failed";
 export interface PlanView {
   id: number;
   issueNumber: number;

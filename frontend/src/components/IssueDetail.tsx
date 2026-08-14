@@ -33,6 +33,11 @@ export function IssueDetail({ issue }: Props) {
                 {issue.state}
               </Badge>
             )}
+            {issue.state_reason && (
+              <Badge variant="secondary" className="text-[10px] capitalize">
+                {issue.state_reason.replace("_", " ")}
+              </Badge>
+            )}
             {issue.labels.map((l) => (
               <Badge key={l} variant="outline" className="text-[10px]">
                 {l}

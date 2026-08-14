@@ -18,6 +18,7 @@ function toIssue(i: {
   title: string;
   body?: string | null;
   state: string;
+  state_reason?: string | null;
   html_url: string;
   labels: ({ name?: string | null } | string)[];
 }): Issue {
@@ -26,6 +27,7 @@ function toIssue(i: {
     title: i.title,
     body: i.body ?? null,
     state: i.state,
+    state_reason: i.state_reason ?? null,
     url: i.html_url,
     labels: i.labels.map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean),
   };
@@ -112,5 +114,34 @@ export async function requestCopilotReview(prNumber: number, repo?: Partial<Repo
     repo: target.name,
     pull_number: prNumber,
     reviewers: [COPILOT_REVIEWER],
+  });
+}
+
+export async function isPullRequestMerged(
+  prNumber: number,
+  repo?: Partial<RepoRef>,
+): Promise<boolean> {
+  const target = normalizeRepo(repo);
+  try {
+    const { data } = await octokit.pulls.get({
+      owner: target.owner,
+      repo: target.name,
+      pull_number: prNumber,
+    });
+    return !!data.merged;
+  } catch (err) {
+    if (err && typeof err === "object" && "status" in err && err.status === 404) return false;
+    throw err;
+  }
+}
+
+export async function closeIssueAsCompleted(number: number, repo?: Partial<RepoRef>): Promise<void> {
+  const target = normalizeRepo(repo);
+  await octokit.issues.update({
+    owner: target.owner,
+    repo: target.name,
+    issue_number: number,
+    state: "closed",
+    state_reason: "completed",
   });
 }

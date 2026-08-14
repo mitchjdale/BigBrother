@@ -45,11 +45,11 @@ export function PlanPanel({ planId, planningModel, executionModel, onStatusChang
 
     const tick = async () => {
       try {
-        const p = await api.getPlan(planId);
+        const p = await api.refreshExecution(planId).catch(() => api.getPlan(planId));
         if (!active) return;
         applyPlan(p);
         setError(null);
-        if (p.status === "planning" || p.status === "executing") {
+        if (p.status === "planning" || p.status === "executing" || p.status === "pr_open") {
           timer = window.setTimeout(tick, POLL_MS);
         }
       } catch (e) {
@@ -63,7 +63,10 @@ export function PlanPanel({ planId, planningModel, executionModel, onStatusChang
     };
   }, [applyPlan, planId]);
 
-  const refresh = async () => applyPlan(await api.getPlan(planId));
+  const refresh = async () => {
+    const next = await api.refreshExecution(planId).catch(() => api.getPlan(planId));
+    applyPlan(next);
+  };
 
   const doRegenerate = async () => {
     if (!feedback.trim()) return;
@@ -131,9 +134,11 @@ export function PlanPanel({ planId, planningModel, executionModel, onStatusChang
 
   const poll = () => {
     const id = window.setInterval(async () => {
-      const p = await api.getPlan(planId);
+      const p = await api.refreshExecution(planId).catch(() => api.getPlan(planId));
       applyPlan(p);
-      if (p.status !== "planning" && p.status !== "executing") window.clearInterval(id);
+      if (p.status !== "planning" && p.status !== "executing" && p.status !== "pr_open") {
+        window.clearInterval(id);
+      }
     }, POLL_MS);
   };
 

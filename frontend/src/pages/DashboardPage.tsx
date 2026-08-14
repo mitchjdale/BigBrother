@@ -99,19 +99,20 @@ export default function DashboardPage() {
     if (pollers.current[issueNumber]) window.clearInterval(pollers.current[issueNumber]);
     pollers.current[issueNumber] = window.setInterval(async () => {
       try {
+        await api.refreshExecution(planId).catch(() => null);
         const p = await api.getPlan(planId);
         setPlans((prev) => ({
           ...prev,
           [issueNumber]: { planId, status: p.status, estimatedUsd: p.totalCost.estimatedUsd },
         }));
-        if (p.status !== "planning" && p.status !== "executing") {
+        if (p.status !== "planning" && p.status !== "executing" && p.status !== "pr_open") {
           window.clearInterval(pollers.current[issueNumber]);
           delete pollers.current[issueNumber];
         }
       } catch {
         /* keep polling */
       }
-    }, 2500);
+    }, 15000);
   }, []);
 
   // Restore persisted plans after a page/server restart so previously planned
@@ -176,7 +177,9 @@ export default function DashboardPage() {
         const map: Record<number, PlanRef> = {};
         for (const p of existing) {
           map[p.issueNumber] = { planId: p.planId, status: p.status, estimatedUsd: p.estimatedUsd };
-          if (p.status === "planning" || p.status === "executing") trackPlan(p.issueNumber, p.planId);
+          if (p.status === "planning" || p.status === "executing" || p.status === "pr_open") {
+            trackPlan(p.issueNumber, p.planId);
+          }
         }
         writeCache(`bb.cache.plans:${selectedRepo.owner}/${selectedRepo.name}`, map);
         setPlans((prev) => ({ ...map, ...prev }));

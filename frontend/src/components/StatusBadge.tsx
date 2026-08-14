@@ -10,6 +10,7 @@ const MAP: Record<
   ready: { label: "Plan ready", variant: "success" },
   executing: { label: "Executing…", variant: "secondary" },
   pr_open: { label: "PR open", variant: "warning" },
+  completed: { label: "Completed", variant: "success" },
   failed: { label: "Failed", variant: "destructive" },
 };
 
