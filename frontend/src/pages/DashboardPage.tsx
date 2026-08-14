@@ -95,19 +95,20 @@ export default function DashboardPage() {
     if (pollers.current[issueNumber]) window.clearInterval(pollers.current[issueNumber]);
     pollers.current[issueNumber] = window.setInterval(async () => {
       try {
+        await api.refreshExecution(planId).catch(() => null);
         const p = await api.getPlan(planId);
         setPlans((prev) => ({
           ...prev,
           [issueNumber]: { planId, status: p.status, estimatedUsd: p.totalCost.estimatedUsd },
         }));
-        if (p.status !== "planning" && p.status !== "executing") {
+        if (p.status !== "planning" && p.status !== "executing" && p.status !== "pr_open") {
           window.clearInterval(pollers.current[issueNumber]);
           delete pollers.current[issueNumber];
         }
       } catch {
         /* keep polling */
       }
-    }, 2500);
+    }, 15000);
   }, []);
 
   // Restore persisted plans after a page/server restart so previously planned
@@ -172,7 +173,9 @@ export default function DashboardPage() {
         const map: Record<number, PlanRef> = {};
         for (const p of existing) {
           map[p.issueNumber] = { planId: p.planId, status: p.status, estimatedUsd: p.estimatedUsd };
-          if (p.status === "planning" || p.status === "executing") trackPlan(p.issueNumber, p.planId);
+          if (p.status === "planning" || p.status === "executing" || p.status === "pr_open") {
+            trackPlan(p.issueNumber, p.planId);
+          }
         }
         writeCache(`bb.cache.plans:${selectedRepo.owner}/${selectedRepo.name}`, map);
         setPlans((prev) => ({ ...map, ...prev }));
@@ -289,7 +292,7 @@ export default function DashboardPage() {
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(320px,420px)_1fr] overflow-hidden">
         <aside className="flex flex-col overflow-hidden border-r">
           <div className="border-b px-4 py-2 text-sm font-medium text-muted-foreground">
-            Open issues {issues.length > 0 && `(${issues.length})`}
+            Issues {issues.length > 0 && `(${issues.length})`}
           </div>
           <div className="flex-1 space-y-2 overflow-auto p-3">
             {loading ? (
@@ -302,7 +305,7 @@ export default function DashboardPage() {
               <div className="p-4 text-sm text-muted-foreground">
                 {loadingRepos
                   ? "Loading repositories…"
-                  : `No open issues found for ${selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "the selected repository"}.`}
+                  : `No issues found for ${selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "the selected repository"}.`}
               </div>
             ) : (
               issues.map((issue) => (

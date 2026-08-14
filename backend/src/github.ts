@@ -17,7 +17,7 @@ export async function listIssues(repo?: Partial<RepoRef>): Promise<Issue[]> {
   const res = await octokit.issues.listForRepo({
     owner: target.owner,
     repo: target.name,
-    state: "open",
+    state: "all",
     per_page: 50,
   });
   return res.data
@@ -27,6 +27,7 @@ export async function listIssues(repo?: Partial<RepoRef>): Promise<Issue[]> {
       title: i.title,
       body: i.body ?? null,
       state: i.state,
+      state_reason: i.state_reason ?? null,
       url: i.html_url,
       labels: i.labels.map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean),
     }));
@@ -73,7 +74,37 @@ export async function getIssue(number: number, repo?: Partial<RepoRef>): Promise
     title: i.title,
     body: i.body ?? null,
     state: i.state,
+    state_reason: i.state_reason ?? null,
     url: i.html_url,
     labels: i.labels.map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean),
   };
+}
+
+export async function isPullRequestMerged(
+  prNumber: number,
+  repo?: Partial<RepoRef>,
+): Promise<boolean> {
+  const target = normalizeRepo(repo);
+  try {
+    const { data } = await octokit.pulls.get({
+      owner: target.owner,
+      repo: target.name,
+      pull_number: prNumber,
+    });
+    return !!data.merged;
+  } catch (err) {
+    if (err && typeof err === "object" && "status" in err && err.status === 404) return false;
+    throw err;
+  }
+}
+
+export async function closeIssueAsCompleted(number: number, repo?: Partial<RepoRef>): Promise<void> {
+  const target = normalizeRepo(repo);
+  await octokit.issues.update({
+    owner: target.owner,
+    repo: target.name,
+    issue_number: number,
+    state: "closed",
+    state_reason: "completed",
+  });
 }

@@ -9,6 +9,7 @@ import { db } from "./db.js";
 import { log } from "./logger.js";
 import { ghAgentEnv } from "./auth.js";
 import { captureUsageBySessionRef } from "./usage.js";
+import { closeIssueAsCompleted, isPullRequestMerged } from "./github.js";
 
 const run = promisify(execFile);
 const execLog = log("execute");
@@ -174,30 +175,59 @@ export function scheduleExecuteJob(
 export async function refreshExecution(planId: number): Promise<void> {
   const pr = db
     .prepare(
-      `SELECT pr.id, pr.session_ref, p.repo_owner, p.repo_name
+      `SELECT pr.id, pr.session_ref, pr.pr_number, p.repo_owner, p.repo_name, p.issue_number
        FROM prs pr
        JOIN plans p ON p.id = pr.plan_id
        WHERE pr.plan_id=?
        ORDER BY pr.id DESC LIMIT 1`,
     )
     .get(planId) as
-    | { id: number; session_ref: string | null; repo_owner: string; repo_name: string }
+    | {
+        id: number;
+        session_ref: string | null;
+        pr_number: number | null;
+        repo_owner: string;
+        repo_name: string;
+        issue_number: number;
+      }
     | undefined;
-  if (!pr?.session_ref) return;
+  if (!pr) return;
 
   try {
-    const { stdout } = await run(
-      "gh",
-      ["agent-task", "view", pr.session_ref, "--repo", `${pr.repo_owner}/${pr.repo_name}`],
-      { env: ghEnv(), maxBuffer: 32 * 1024 * 1024 },
-    );
-    const parsed = parseAgentTaskOutput(stdout);
-    if (parsed.prUrl) {
-      db.prepare(
-        `UPDATE prs SET pr_number=?, url=?, agent_state='pr_open', updated_at=datetime('now') WHERE id=?`,
-      ).run(parsed.prNumber, parsed.prUrl, pr.id);
-      db.prepare(`UPDATE plans SET status='pr_open', updated_at=datetime('now') WHERE id=?`).run(planId);
-      execLog.info({ planId, prNumber: parsed.prNumber, prUrl: parsed.prUrl }, "refresh picked up draft PR");
+    let prNumber = pr.pr_number ?? null;
+
+    if (pr.session_ref) {
+      const { stdout } = await run(
+       "gh",
+       ["agent-task", "view", pr.session_ref, "--repo", `${pr.repo_owner}/${pr.repo_name}`],
+       { env: ghEnv(), maxBuffer: 32 * 1024 * 1024 },
+      );
+      const parsed = parseAgentTaskOutput(stdout);
+      if (parsed.prUrl) {
+       prNumber = parsed.prNumber ?? prNumber;
+       db.prepare(
+         `UPDATE prs SET pr_number=?, url=?, agent_state='pr_open', updated_at=datetime('now') WHERE id=?`,
+       ).run(parsed.prNumber, parsed.prUrl, pr.id);
+       db.prepare(`UPDATE plans SET status='pr_open', updated_at=datetime('now') WHERE id=?`).run(planId);
+       execLog.info(
+         { planId, prNumber: parsed.prNumber, prUrl: parsed.prUrl },
+         "refresh picked up draft PR",
+       );
+      }
+    }
+
+    if (prNumber != null) {
+      const merged = await isPullRequestMerged(prNumber, { owner: pr.repo_owner, name: pr.repo_name });
+      if (merged) {
+        db.prepare(`UPDATE prs SET agent_state='merged', updated_at=datetime('now') WHERE id=?`).run(pr.id);
+        db.prepare(`UPDATE plans SET status='completed', updated_at=datetime('now') WHERE id=?`).run(planId);
+        try {
+          await closeIssueAsCompleted(pr.issue_number, { owner: pr.repo_owner, name: pr.repo_name });
+        } catch (err) {
+          execLog.warn({ err, planId, prNumber }, "failed to close issue as completed");
+        }
+        execLog.info({ planId, prNumber }, "refresh marked plan completed from merged PR");
+      }
     }
     // The cloud agent keeps working after dispatch, so re-capture its usage on
     // every refresh to keep implementation totals current (issue #18).
