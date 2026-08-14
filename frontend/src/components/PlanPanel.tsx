@@ -116,6 +116,19 @@ export function PlanPanel({ planId, planningModel, executionModel, onStatusChang
     }
   };
 
+  const doRequestReview = async () => {
+    setBusy(true);
+    try {
+      const updated = await api.requestReview(planId);
+      setPlan(updated);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const poll = () => {
     const id = window.setInterval(async () => {
       const p = await api.getPlan(planId);
@@ -134,6 +147,7 @@ export function PlanPanel({ planId, planningModel, executionModel, onStatusChang
 
   const isPlanning = plan.status === "planning";
   const canExecute = plan.status === "ready";
+  const canRequestReview = !!plan.pr?.url && plan.pr.number != null;
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -167,14 +181,23 @@ export function PlanPanel({ planId, planningModel, executionModel, onStatusChang
       )}
 
       {plan.pr?.url && (
-        <a
-          href={plan.pr.url}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-        >
-          <ExternalLink className="h-4 w-4" /> Draft PR #{plan.pr.number}
-        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={plan.pr.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+          >
+            <ExternalLink className="h-4 w-4" /> Draft PR #{plan.pr.number}
+          </a>
+          {plan.pr.reviewState === "requested" && <Badge variant="secondary">Copilot review requested</Badge>}
+          {canRequestReview && plan.pr.reviewState !== "requested" && (
+            <Button variant="outline" size="sm" onClick={doRequestReview} disabled={busy}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Request Copilot review
+            </Button>
+          )}
+        </div>
       )}
 
       <Card className="flex-1 overflow-hidden">

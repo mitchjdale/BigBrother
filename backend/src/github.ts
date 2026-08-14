@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import type { Issue, RepoRef } from "./types.js";
 
 const octokit = new Octokit({ auth: config.ghToken || undefined });
+export const COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]";
 
 function normalizeRepo(repo?: Partial<RepoRef>): RepoRef {
   return {
@@ -79,4 +80,14 @@ export async function getIssue(number: number, repo?: Partial<RepoRef>): Promise
     url: i.html_url,
     labels: i.labels.map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean),
   };
+}
+
+export async function requestCopilotReview(prNumber: number, repo?: Partial<RepoRef>): Promise<void> {
+  const target = normalizeRepo(repo);
+  await octokit.pulls.requestReviewers({
+    owner: target.owner,
+    repo: target.name,
+    pull_number: prNumber,
+    reviewers: [COPILOT_REVIEWER],
+  });
 }
