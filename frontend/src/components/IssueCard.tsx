@@ -25,16 +25,18 @@ export function IssueCard({ issue, status, selected, busy, onCreatePlan, onSelec
           <CardTitle className="text-sm">
             <span className="text-muted-foreground">#{issue.number}</span> {issue.title}
           </CardTitle>
-          {status && <StatusBadge status={status} />}
         </div>
       </CardHeader>
-      <CardContent className="flex items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-1">
-          {issue.labels.map((l) => (
-            <Badge key={l} variant="outline" className="text-[10px]">
-              {l}
-            </Badge>
-          ))}
+      <CardContent className="flex items-end justify-between gap-2">
+        <div className="flex flex-col items-start gap-2">
+          <div className="flex flex-wrap gap-1">
+            {issue.labels.map((l) => (
+              <Badge key={l} variant="outline" className="text-[10px]">
+                {l}
+              </Badge>
+            ))}
+          </div>
+          {status && <StatusBadge status={status} />}
         </div>
         <Button
           size="sm"
