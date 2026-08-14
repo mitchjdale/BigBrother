@@ -19,6 +19,8 @@ The dev server proxies `/api/*` to `http://localhost:8787` (see `vite.config.ts`
 - Issues column: open issues for the configured repo; each card has Create plan and a
   live status badge (planning -> ready -> executing -> pr_open). Multiple tickets can
   plan concurrently.
+- Issue detail: selecting an issue shows its full description (rendered markdown) plus a
+  "View on GitHub" link to open the issue externally, above the plan panel.
 - Header controls: choose planning and execution models independently, or leave either on
   **Copilot default (auto)** to let Copilot choose.
 - Plan panel: polls status, renders plan markdown, shows a cost bar (AIU, tokens, model,
@@ -29,7 +31,7 @@ The dev server proxies `/api/*` to `http://localhost:8787` (see `vite.config.ts`
 
 ## Structure
 - src/api/client.ts - typed fetch client for the backend.
-- src/components/ - IssueCard, PlanPanel, CostBar, StatusBadge, ui/* (shadcn primitives).
+- src/components/ - IssueCard, IssueDetail, PlanPanel, CostBar, StatusBadge, ui/* (shadcn primitives).
 - src/App.tsx - two-column dashboard + concurrent plan trackers.
 
 ## Tech stack
@@ -52,6 +54,7 @@ The dev server proxies `/api/*` to `http://localhost:8787` (see `vite.config.ts`
 
 ## Key components
 - `App.tsx` — loads issues, tracks a plan per ticket, polls active plans concurrently.
+- `IssueDetail.tsx` — full issue description (markdown) + external GitHub link for the selected issue.
 - `PlanPanel.tsx` — polls one plan; renders markdown, cost bar, edit/regenerate/execute.
 - `CostBar.tsx` — AIU, in/out tokens, model, duration, version count.
 - `StatusBadge.tsx` — maps plan status → labelled badge (pulses while planning/executing).
