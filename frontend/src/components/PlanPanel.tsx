@@ -9,7 +9,7 @@ import { CostBar } from "./CostBar";
 import { api, type PlanStatus, type PlanView } from "@/api/client";
 import { ExternalLink, Loader2, Pencil, RefreshCw, Rocket, RotateCcw, Save, X } from "lucide-react";
 
-const POLL_MS = 10_000;
+const POLL_MS = 15_000;
 
 interface Props {
   planId: number;
@@ -26,6 +26,8 @@ export function PlanPanel({ planId, planningModel, executionModel, onStatusChang
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lastStatus = useRef<PlanStatus | null>(null);
+  const active = useRef(true);
+  const pollTimer = useRef<number | undefined>(undefined);
 
   const applyPlan = useCallback(
     (next: PlanView) => {
@@ -38,30 +40,37 @@ export function PlanPanel({ planId, planningModel, executionModel, onStatusChang
     [onStatusChange],
   );
 
-  useEffect(() => {
-    let active = true;
-    let timer: number | undefined;
-    lastStatus.current = null;
-
+  // Single poller: only ever one timer is scheduled (guarded by pollTimer).
+  // Callers that resume polling (execute/regenerate/retry) reuse this instead
+  // of spinning up their own setInterval, which previously stacked up and
+  // flooded GitHub with requests.
+  const startPolling = useCallback(() => {
+    if (pollTimer.current) window.clearTimeout(pollTimer.current);
     const tick = async () => {
       try {
         const p = await api.refreshExecution(planId).catch(() => api.getPlan(planId));
-        if (!active) return;
+        if (!active.current) return;
         applyPlan(p);
         setError(null);
         if (p.status === "planning" || p.status === "executing" || p.status === "pr_open") {
-          timer = window.setTimeout(tick, POLL_MS);
+          pollTimer.current = window.setTimeout(tick, POLL_MS);
         }
       } catch (e) {
-        if (active) setError(e instanceof Error ? e.message : String(e));
+        if (active.current) setError(e instanceof Error ? e.message : String(e));
       }
     };
     tick();
-    return () => {
-      active = false;
-      if (timer) window.clearTimeout(timer);
-    };
   }, [applyPlan, planId]);
+
+  useEffect(() => {
+    active.current = true;
+    lastStatus.current = null;
+    startPolling();
+    return () => {
+      active.current = false;
+      if (pollTimer.current) window.clearTimeout(pollTimer.current);
+    };
+  }, [startPolling]);
 
   const refresh = async () => {
     const next = await api.refreshExecution(planId).catch(() => api.getPlan(planId));
@@ -132,15 +141,7 @@ export function PlanPanel({ planId, planningModel, executionModel, onStatusChang
     }
   };
 
-  const poll = () => {
-    const id = window.setInterval(async () => {
-      const p = await api.refreshExecution(planId).catch(() => api.getPlan(planId));
-      applyPlan(p);
-      if (p.status !== "planning" && p.status !== "executing" && p.status !== "pr_open") {
-        window.clearInterval(id);
-      }
-    }, POLL_MS);
-  };
+  const poll = startPolling;
 
   if (!plan) {
     return (

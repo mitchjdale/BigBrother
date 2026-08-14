@@ -113,7 +113,7 @@ export default function DashboardPage() {
       } catch {
         /* keep polling */
       }
-    }, 15000);
+    }, 30000);
   }, []);
 
   // Restore persisted plans after a page/server restart so previously planned
