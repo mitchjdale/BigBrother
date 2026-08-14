@@ -1,6 +1,7 @@
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { log } from "./logger.js";
+import { estimateUsd } from "./pricing.js";
 import { generatePlan, PlanError } from "./copilot.js";
 import { getIssue } from "./github.js";
 import { enqueuePlan } from "./queue.js";
@@ -38,13 +39,41 @@ export function getLatestPlanIdForIssue(issueNumber: number, repo: RepoRef): num
   return row?.id ?? null;
 }
 
+/** Sum best-effort estimated USD (model-aware) across every job, per issue. */
+function estimatedUsdByIssue(repo: RepoRef): Map<number, number> {
+  const rows = db
+    .prepare(
+      `SELECT p.issue_number AS issueNumber, j.model AS model,
+              COALESCE(SUM(j.input_tokens),0) AS input_tokens,
+              COALESCE(SUM(j.output_tokens),0) AS output_tokens
+       FROM jobs j
+       JOIN plans p ON p.id = j.plan_id
+       WHERE p.repo_owner=? AND p.repo_name=? AND j.type IN ('plan','execute')
+       GROUP BY p.issue_number, j.model`,
+    )
+    .all(repo.owner, repo.name) as {
+    issueNumber: number;
+    model: string | null;
+    input_tokens: number;
+    output_tokens: number;
+  }[];
+
+  const byIssue = new Map<number, number>();
+  for (const r of rows) {
+    const usd = estimateUsd(r.model, r.input_tokens, r.output_tokens);
+    byIssue.set(r.issueNumber, (byIssue.get(r.issueNumber) ?? 0) + usd);
+  }
+  return byIssue;
+}
+
 /** One entry per issue (its latest plan) for dashboard hydration after a reload. */
 export function listLatestPlansByIssue(repo: RepoRef): {
   issueNumber: number;
   planId: number;
   status: string;
+  estimatedUsd: number;
 }[] {
-  return db
+  const rows = db
     .prepare(
       `SELECT p.issue_number AS issueNumber, p.id AS planId, p.status AS status
        FROM plans p
@@ -61,6 +90,9 @@ export function listLatestPlansByIssue(repo: RepoRef): {
     planId: number;
     status: string;
   }[];
+
+  const estimates = estimatedUsdByIssue(repo);
+  return rows.map((r) => ({ ...r, estimatedUsd: estimates.get(r.issueNumber) ?? 0 }));
 }
 
 function nextVersionNo(planId: number): number {
@@ -254,14 +286,24 @@ export function getPlanView(planId: number) {
   // versions — not just the versions that produced markdown (issue #11).
   const attempts = db
     .prepare(
-      `SELECT input_tokens, output_tokens, nano_aiu, status
+      `SELECT input_tokens, output_tokens, nano_aiu, model, status
        FROM jobs WHERE plan_id=? AND type='plan'`,
     )
-    .all(planId) as { input_tokens: number; output_tokens: number; nano_aiu: number; status: string }[];
+    .all(planId) as {
+    input_tokens: number;
+    output_tokens: number;
+    nano_aiu: number;
+    model: string | null;
+    status: string;
+  }[];
 
   const totalNanoAiu = attempts.reduce((s, a) => s + a.nano_aiu, 0);
   const totalInput = attempts.reduce((s, a) => s + a.input_tokens, 0);
   const totalOutput = attempts.reduce((s, a) => s + a.output_tokens, 0);
+  const totalEstimatedUsd = attempts.reduce(
+    (s, a) => s + estimateUsd(a.model, a.input_tokens, a.output_tokens),
+    0,
+  );
   const failedAttempts = attempts.filter((a) => a.status === "failed").length;
   const aiu = totalNanoAiu / 1e9;
 
@@ -295,6 +337,7 @@ export function getPlanView(planId: number) {
             outputTokens: current.output_tokens,
             aiu: current.nano_aiu / 1e9,
             usd: config.usdPerAiu > 0 ? (current.nano_aiu / 1e9) * config.usdPerAiu : null,
+            estimatedUsd: estimateUsd(current.model, current.input_tokens, current.output_tokens),
             model: current.model,
             durationMs: current.duration_ms,
           },
@@ -305,6 +348,7 @@ export function getPlanView(planId: number) {
       outputTokens: totalOutput,
       aiu,
       usd: config.usdPerAiu > 0 ? aiu * config.usdPerAiu : null,
+      estimatedUsd: totalEstimatedUsd,
       versions: versions.length,
       attempts: attempts.length,
       failedAttempts,

@@ -18,6 +18,7 @@ export interface Cost {
   outputTokens: number;
   aiu: number;
   usd: number | null;
+  estimatedUsd?: number;
   model?: string | null;
   durationMs?: number;
 }
@@ -56,6 +57,7 @@ export interface PlanView {
     outputTokens: number;
     aiu: number;
     usd: number | null;
+    estimatedUsd: number;
     versions: number;
     attempts: number;
     failedAttempts: number;
@@ -71,6 +73,7 @@ export interface PhaseTotals {
   totalTokens: number;
   aiu: number;
   usd: number | null;
+  estimatedUsd: number;
   attempts: number;
   failedAttempts: number;
 }
@@ -82,6 +85,7 @@ export interface UsageBucket {
   totalTokens: number;
   aiu: number;
   usd: number | null;
+  estimatedUsd: number;
   attempts: number;
   planning: PhaseTotals;
   implementation: PhaseTotals;
@@ -95,6 +99,7 @@ export interface RepoUsage {
   totalTokens: number;
   aiu: number;
   usd: number | null;
+  estimatedUsd: number;
   attempts: number;
   planning: PhaseTotals;
   implementation: PhaseTotals;
@@ -111,6 +116,7 @@ export interface UsageReport {
     totalTokens: number;
     aiu: number;
     usd: number | null;
+    estimatedUsd: number;
     attempts: number;
     failedAttempts: number;
     plans: number;
@@ -155,7 +161,7 @@ export const api = {
 
   listPlans: (repo: RepoRef) =>
     fetch(`${BASE}/plans${repoQuery(repo)}`).then(
-      json<{ issueNumber: number; planId: number; status: PlanStatus }[]>,
+      json<{ issueNumber: number; planId: number; status: PlanStatus; estimatedUsd: number }[]>,
     ),
 
   getIssuePlan: (issueNumber: number, repo: RepoRef) =>

@@ -10,6 +10,7 @@ import { Eye, Loader2, RefreshCw } from "lucide-react";
 interface PlanRef {
   planId: number;
   status: PlanStatus;
+  estimatedUsd?: number;
 }
 
 const MODEL_OPTIONS = [
@@ -95,7 +96,10 @@ export default function DashboardPage() {
     pollers.current[issueNumber] = window.setInterval(async () => {
       try {
         const p = await api.getPlan(planId);
-        setPlans((prev) => ({ ...prev, [issueNumber]: { planId, status: p.status } }));
+        setPlans((prev) => ({
+          ...prev,
+          [issueNumber]: { planId, status: p.status, estimatedUsd: p.totalCost.estimatedUsd },
+        }));
         if (p.status !== "planning" && p.status !== "executing") {
           window.clearInterval(pollers.current[issueNumber]);
           delete pollers.current[issueNumber];
@@ -167,7 +171,7 @@ export default function DashboardPage() {
         if (!active) return;
         const map: Record<number, PlanRef> = {};
         for (const p of existing) {
-          map[p.issueNumber] = { planId: p.planId, status: p.status };
+          map[p.issueNumber] = { planId: p.planId, status: p.status, estimatedUsd: p.estimatedUsd };
           if (p.status === "planning" || p.status === "executing") trackPlan(p.issueNumber, p.planId);
         }
         writeCache(`bb.cache.plans:${selectedRepo.owner}/${selectedRepo.name}`, map);
@@ -306,6 +310,7 @@ export default function DashboardPage() {
                   key={issue.number}
                   issue={issue}
                   status={plans[issue.number]?.status}
+                  estimatedUsd={plans[issue.number]?.estimatedUsd}
                   selected={selected === issue.number}
                   busy={!!creating[issue.number]}
                   onCreatePlan={() => createPlan(issue)}
