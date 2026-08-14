@@ -69,6 +69,15 @@ async function json<T>(res: Response): Promise<T> {
 export const api = {
   listIssues: () => fetch(`${BASE}/repos/issues`).then(json<Issue[]>),
 
+  listPlans: () =>
+    fetch(`${BASE}/plans`).then(json<{ issueNumber: number; planId: number; status: PlanStatus }[]>),
+
+  getIssuePlan: (issueNumber: number) =>
+    fetch(`${BASE}/issues/${issueNumber}/plan`).then(async (r) => {
+      if (r.status === 404) return null;
+      return json<PlanView>(r);
+    }),
+
   createPlan: (issueNumber: number) =>
     fetch(`${BASE}/issues/${issueNumber}/plan`, { method: "POST" }).then(
       json<{ planId: number; status: PlanStatus }>,
