@@ -1,6 +1,8 @@
 import express from "express";
+import { pinoHttp } from "pino-http";
 import { config } from "./config.js";
 import { db } from "./db.js";
+import { logger, log } from "./logger.js";
 import { getIssue, listIssues, listSelectableRepos } from "./github.js";
 import {
   createPlanRecord,
@@ -14,7 +16,37 @@ import {
 import { scheduleExecuteJob, refreshExecution } from "./execute.js";
 import type { RepoRef } from "./types.js";
 
+const httpLog = log("http");
 const app = express();
+
+// Structured per-request logging (method, url, status, latency). Health checks
+// are logged at debug to keep the stream readable.
+app.use(
+  pinoHttp({
+    logger,
+    autoLogging: { ignore: (req) => req.url === "/health" },
+    // pino-http binds `req` into the per-request child logger, so the only way
+    // to keep it out of the success line is to log completions from the base
+    // logger (quietResLogger). We then re-attach req/res explicitly on errors.
+    quietResLogger: true,
+    customLogLevel: (_req, res, err) => {
+      if (err || res.statusCode >= 500) return "error";
+      if (res.statusCode >= 400) return "warn";
+      return "info";
+    },
+    // Title line for every request (time + level + this message).
+    customSuccessMessage: (req, res, responseTime) =>
+      `${req.method} ${req.url} ${res.statusCode} (${responseTime}ms)`,
+    customErrorMessage: (req, res, err) =>
+      `${req.method} ${req.url} ${res.statusCode} - ${err.message}`,
+    // Keep normal requests to a one-line summary; only attach the full
+    // req/res JSON body when something went wrong (status >= 400 or an error).
+    customSuccessObject: (req, res, val) =>
+      res.statusCode >= 400 ? { req, ...val } : {},
+    customErrorObject: (req, _res, _err, val) => ({ req, ...val }),
+  }),
+);
+
 app.use(express.json({ limit: "2mb" }));
 
 function parseModel(body: unknown): { model: string | null | undefined; error: string | null } {
@@ -226,9 +258,30 @@ app.post("/plans/:id/refresh-execution", async (req, res) => {
   res.json(view);
 });
 
+// --- Centralised error + process logging ---
+app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const message = err instanceof Error ? err.message : String(err);
+  (req.log ?? httpLog).error({ err, path: req.path }, "unhandled request error");
+  if (!res.headersSent) res.status(500).json({ error: message });
+});
+
+process.on("unhandledRejection", (reason) => {
+  logger.error({ err: reason }, "unhandledRejection");
+});
+process.on("uncaughtException", (err) => {
+  logger.fatal({ err }, "uncaughtException");
+});
+
 app.listen(config.port, () => {
-  console.log(
-    `bigbrother backend on :${config.port} → ${config.repo.owner}/${config.repo.name} ` +
-      `(token: ${config.ghToken ? "yes" : "MISSING"}, concurrency: ${config.planConcurrency})`,
+  httpLog.info(
+    {
+      port: config.port,
+      repo: `${config.repo.owner}/${config.repo.name}`,
+      hasToken: !!config.ghToken,
+      planConcurrency: config.planConcurrency,
+      planModel: config.planModel || "auto",
+      logLevel: config.logLevel,
+    },
+    "bigbrother backend started",
   );
 });

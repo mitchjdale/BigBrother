@@ -6,9 +6,11 @@ import { promisify } from "node:util";
 import PQueue from "p-queue";
 import { config } from "./config.js";
 import { db } from "./db.js";
+import { log } from "./logger.js";
 import { ghAgentEnv } from "./auth.js";
 
 const run = promisify(execFile);
+const execLog = log("execute");
 
 export const executeQueue = new PQueue({ concurrency: config.planConcurrency });
 
@@ -57,8 +59,16 @@ export function scheduleExecuteJob(
 
   db.prepare(`UPDATE plans SET status='executing', updated_at=datetime('now') WHERE id=?`).run(planId);
 
+  const jobLog = execLog.child({
+    jobId,
+    planId,
+    repo: `${plan.repo_owner}/${plan.repo_name}`,
+  });
+  jobLog.info("execute job queued");
+
   void executeQueue.add(async () => {
     db.prepare(`UPDATE jobs SET status='running', updated_at=datetime('now') WHERE id=?`).run(jobId);
+    jobLog.info({ model: opts.model ?? config.executeModel ?? "auto" }, "execute job started");
     const planFile = path.join(os.tmpdir(), `bb-plan-${planId}-${Date.now()}.md`);
     try {
       fs.writeFileSync(
@@ -103,8 +113,13 @@ export function scheduleExecuteJob(
       db.prepare(
         `UPDATE plans SET status=?, error=NULL, updated_at=datetime('now') WHERE id=?`,
       ).run(parsed.prUrl ? "pr_open" : "executing", planId);
+      jobLog.info(
+        { sessionRef: parsed.sessionRef, prNumber: parsed.prNumber, prUrl: parsed.prUrl },
+        parsed.prUrl ? "execute job opened draft PR" : "execute job dispatched (PR pending)",
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      jobLog.error({ err }, "execute job failed");
       db.prepare(`UPDATE jobs SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`).run(
         msg,
         jobId,
@@ -149,8 +164,10 @@ export async function refreshExecution(planId: number): Promise<void> {
         `UPDATE prs SET pr_number=?, url=?, agent_state='pr_open', updated_at=datetime('now') WHERE id=?`,
       ).run(parsed.prNumber, parsed.prUrl, pr.id);
       db.prepare(`UPDATE plans SET status='pr_open', updated_at=datetime('now') WHERE id=?`).run(planId);
+      execLog.info({ planId, prNumber: parsed.prNumber, prUrl: parsed.prUrl }, "refresh picked up draft PR");
     }
-  } catch {
+  } catch (err) {
     // best-effort refresh; leave state unchanged on failure
+    execLog.warn({ err, planId }, "execute refresh failed (leaving state unchanged)");
   }
 }
