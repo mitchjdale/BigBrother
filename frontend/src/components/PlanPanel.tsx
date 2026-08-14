@@ -9,7 +9,7 @@ import { CostBar } from "./CostBar";
 import { api, type PlanStatus, type PlanView } from "@/api/client";
 import { ExternalLink, Loader2, Pencil, RefreshCw, Rocket, RotateCcw, Save, X } from "lucide-react";
 
-const POLL_MS = 2500;
+const POLL_MS = 10_000;
 
 interface Props {
   planId: number;
