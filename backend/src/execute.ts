@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import PQueue from "p-queue";
 import { config } from "./config.js";
 import { db } from "./db.js";
+import { ghAgentEnv } from "./auth.js";
 
 const run = promisify(execFile);
 
@@ -32,7 +33,7 @@ export function parseAgentTaskOutput(text: string): ParsedAgentTask {
 }
 
 function ghEnv() {
-  return { ...process.env, GH_TOKEN: config.ghToken, GITHUB_TOKEN: config.ghToken };
+  return ghAgentEnv();
 }
 
 /**

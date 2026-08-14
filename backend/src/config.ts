@@ -35,6 +35,7 @@ export const config = {
     name: env("REPO_NAME", "WealthOlympics"),
     base: env("REPO_BASE", "main"),
   },
+  repoPrivate: env("REPO_PRIVATE", "false").toLowerCase() === "true",
   port: Number(env("PORT", "8787")),
   planConcurrency: Number(env("PLAN_CONCURRENCY", "5")),
   workDir: path.resolve(expandHome(env("WORK_DIR", "./.work"))),
