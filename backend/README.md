@@ -87,7 +87,7 @@ are stripped before those subprocesses run.
 |---|---|---|
 | GET  | `/health` | sanity + token check |
 | GET  | `/repos` | list selectable repositories (owner/name/base) for the UI dropdowns |
-| GET  | `/repos/issues` | list open issues for the selected repo (M1) |
+| GET  | `/repos/issues` | list issues for the selected repo (`state=open|closed`, default `open`; closed returns only issues with plan records in this DB) (M1) |
 | GET  | `/plans` | latest plan per issue + per-issue `estimatedUsd` for the ticket cost badge (dashboard hydration) (#19) |
 | GET  | `/issues/:number/plan` | latest persisted plan for an issue (404 if none) |
 | POST | `/issues/:number/plan` | enqueue a plan (`{ model?: string\|null }`) → `{ planId }` (202). Reuses the issue's existing plan record so token usage accumulates (#11) |

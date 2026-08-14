@@ -100,6 +100,18 @@ export function listLatestPlansByIssue(repo: RepoRef): {
   return rows.map((r) => ({ ...r, estimatedUsd: estimates.get(r.issueNumber) ?? 0 }));
 }
 
+export function listWorkedIssueNumbers(repo: RepoRef): number[] {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT issue_number AS n
+       FROM plans
+       WHERE repo_owner=? AND repo_name=?
+       ORDER BY issue_number DESC`,
+    )
+    .all(repo.owner, repo.name) as { n: number }[];
+  return rows.map((r) => r.n);
+}
+
 function nextVersionNo(planId: number): number {
   const row = db
     .prepare(`SELECT COALESCE(MAX(version_no), 0) + 1 AS n FROM plan_versions WHERE plan_id = ?`)

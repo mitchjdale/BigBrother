@@ -158,7 +158,7 @@ export const api = {
   listRepos: () =>
     fetch(`${BASE}/repos`).then(json<{ defaultRepo: RepoRef; repos: RepoRef[] }>),
 
-  listIssues: (repo: RepoRef, state: "open" | "closed" | "all" = "all") => {
+  listIssues: (repo: RepoRef, state: "open" | "closed" = "open") => {
     const params = new URLSearchParams({
       repoOwner: repo.owner,
       repoName: repo.name,

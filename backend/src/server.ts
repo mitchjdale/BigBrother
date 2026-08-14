@@ -13,6 +13,7 @@ import {
   getCurrentPlanMarkdown,
   getLatestPlanIdForIssue,
   listLatestPlansByIssue,
+  listWorkedIssueNumbers,
   deletePlan,
 } from "./planner.js";
 import { scheduleExecuteJob, refreshExecution, requestReviewForPlan } from "./execute.js";
@@ -112,16 +113,6 @@ function queryToRecord(query: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
-function parseIssueState(query: Record<string, unknown>): {
-  state: "open" | "closed" | "all";
-  error: string | null;
-} {
-  const raw = typeof query.state === "string" ? query.state.trim().toLowerCase() : "";
-  if (!raw) return { state: "all", error: null };
-  if (raw === "open" || raw === "closed" || raw === "all") return { state: raw, error: null };
-  return { state: "all", error: "state must be one of: open, closed, all" };
-}
-
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -143,10 +134,17 @@ app.get("/repos", async (_req, res) => {
 app.get("/repos/issues", async (req, res) => {
   const parsedRepo = parseRepo(queryToRecord(req.query as Record<string, unknown>));
   if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
-  const parsedState = parseIssueState(req.query as Record<string, unknown>);
-  if (parsedState.error) return res.status(400).json({ error: parsedState.error });
+  const stateRaw = typeof req.query.state === "string" ? req.query.state.trim().toLowerCase() : "open";
+  if (stateRaw !== "open" && stateRaw !== "closed") {
+    return res.status(400).json({ error: "state must be 'open' or 'closed'" });
+  }
   try {
-    res.json(await listIssues(parsedRepo.repo, parsedState.state));
+    if (stateRaw === "closed") {
+      const numbers = listWorkedIssueNumbers(parsedRepo.repo);
+      if (numbers.length === 0) return res.json([]);
+      return res.json(await listIssues(parsedRepo.repo, { state: "closed", numbers }));
+    }
+    res.json(await listIssues(parsedRepo.repo, { state: "open" }));
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }
