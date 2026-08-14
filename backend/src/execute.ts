@@ -8,6 +8,7 @@ import { config } from "./config.js";
 import { db } from "./db.js";
 import { log } from "./logger.js";
 import { ghAgentEnv } from "./auth.js";
+import { captureUsageBySessionRef } from "./usage.js";
 
 const run = promisify(execFile);
 const execLog = log("execute");
@@ -36,6 +37,37 @@ export function parseAgentTaskOutput(text: string): ParsedAgentTask {
 
 function ghEnv() {
   return ghAgentEnv();
+}
+
+/**
+ * Best-effort: look up the cloud agent session's token/AI-Unit spend and record
+ * it on the execute job so implementation usage feeds the same totals and the
+ * dedicated usage page (issue #18). Silent no-op when usage isn't available.
+ */
+function recordExecuteUsage(jobId: number, sessionRef: string | null, logger = execLog): void {
+  if (!sessionRef) return;
+  const usage = captureUsageBySessionRef(sessionRef);
+  if (usage.inputTokens === 0 && usage.outputTokens === 0 && usage.nanoAiu === 0) return;
+  db.prepare(
+    `UPDATE jobs SET input_tokens=?, output_tokens=?, nano_aiu=?, model=?, duration_ms=?,
+       updated_at=datetime('now') WHERE id=?`,
+  ).run(
+    usage.inputTokens,
+    usage.outputTokens,
+    usage.nanoAiu,
+    usage.model,
+    usage.durationMs,
+    jobId,
+  );
+  logger.info(
+    {
+      sessionRef,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      aiu: usage.nanoAiu / 1e9,
+    },
+    "recorded implementation token usage",
+  );
 }
 
 /**
@@ -110,6 +142,7 @@ export function scheduleExecuteJob(
         parsed.sessionRef,
         jobId,
       );
+      recordExecuteUsage(jobId, parsed.sessionRef, jobLog);
       db.prepare(
         `UPDATE plans SET status=?, error=NULL, updated_at=datetime('now') WHERE id=?`,
       ).run(parsed.prUrl ? "pr_open" : "executing", planId);
@@ -166,6 +199,12 @@ export async function refreshExecution(planId: number): Promise<void> {
       db.prepare(`UPDATE plans SET status='pr_open', updated_at=datetime('now') WHERE id=?`).run(planId);
       execLog.info({ planId, prNumber: parsed.prNumber, prUrl: parsed.prUrl }, "refresh picked up draft PR");
     }
+    // The cloud agent keeps working after dispatch, so re-capture its usage on
+    // every refresh to keep implementation totals current (issue #18).
+    const execJob = db
+      .prepare(`SELECT id FROM jobs WHERE plan_id=? AND type='execute' ORDER BY id DESC LIMIT 1`)
+      .get(planId) as { id: number } | undefined;
+    if (execJob && pr.session_ref) recordExecuteUsage(execJob.id, pr.session_ref);
   } catch (err) {
     // best-effort refresh; leave state unchanged on failure
     execLog.warn({ err, planId }, "execute refresh failed (leaving state unchanged)");
