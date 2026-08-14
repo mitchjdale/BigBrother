@@ -12,6 +12,7 @@ import {
   getCurrentPlanMarkdown,
   getLatestPlanIdForIssue,
   listLatestPlansByIssue,
+  listWorkedIssueNumbers,
 } from "./planner.js";
 import { scheduleExecuteJob, refreshExecution } from "./execute.js";
 import { getUsageReport, type Granularity } from "./reports.js";
@@ -117,8 +118,17 @@ app.get("/repos", async (_req, res) => {
 app.get("/repos/issues", async (req, res) => {
   const parsedRepo = parseRepo(queryToRecord(req.query as Record<string, unknown>));
   if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
+  const stateRaw = typeof req.query.state === "string" ? req.query.state.trim().toLowerCase() : "open";
+  if (stateRaw !== "open" && stateRaw !== "closed") {
+    return res.status(400).json({ error: "state must be 'open' or 'closed'" });
+  }
   try {
-    res.json(await listIssues(parsedRepo.repo));
+    if (stateRaw === "closed") {
+      const numbers = listWorkedIssueNumbers(parsedRepo.repo);
+      if (numbers.length === 0) return res.json([]);
+      return res.json(await listIssues(parsedRepo.repo, { state: "closed", numbers }));
+    }
+    res.json(await listIssues(parsedRepo.repo, { state: "open" }));
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }

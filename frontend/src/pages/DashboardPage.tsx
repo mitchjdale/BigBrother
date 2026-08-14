@@ -31,6 +31,10 @@ export default function DashboardPage() {
   );
   const [selectedOwner, setSelectedOwner] = usePersistentState("bb.dashboard.owner", "");
   const [selectedRepoName, setSelectedRepoName] = usePersistentState("bb.dashboard.repo", "");
+  const [issueState, setIssueState] = usePersistentState<"open" | "closed">(
+    "bb.dashboard.issueState",
+    "open",
+  );
   const [loadingRepos, setLoadingRepos] = useState(
     () => readCache<{ repos: RepoRef[] }>("bb.cache.repos") == null,
   );
@@ -66,7 +70,7 @@ export default function DashboardPage() {
       setLoading(false);
       return;
     }
-    const cacheKey = `bb.cache.issues:${selectedRepo.owner}/${selectedRepo.name}`;
+    const cacheKey = `bb.cache.issues:${selectedRepo.owner}/${selectedRepo.name}:${issueState}`;
     const cached = readCache<Issue[]>(cacheKey);
     if (cached) {
       // Show cached issues immediately and revalidate in the background.
@@ -76,7 +80,7 @@ export default function DashboardPage() {
       setLoading(true);
     }
     try {
-      const fresh = await api.listIssues(selectedRepo);
+      const fresh = await api.listIssues(selectedRepo, issueState);
       setIssues(fresh);
       writeCache(cacheKey, fresh);
       setError(null);
@@ -85,7 +89,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedRepo]);
+  }, [issueState, selectedRepo]);
 
   useEffect(() => {
     return () => clearPollers();
@@ -253,6 +257,17 @@ export default function DashboardPage() {
             </select>
           </label>
           <label className="grid gap-1 text-xs text-muted-foreground">
+            Issue state
+            <select
+              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
+              value={issueState}
+              onChange={(e) => setIssueState((e.target.value as "open" | "closed") ?? "open")}
+            >
+              <option value="open">Open</option>
+              <option value="closed">Closed</option>
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
             Planning model
             <select
               className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
@@ -289,7 +304,7 @@ export default function DashboardPage() {
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(320px,420px)_1fr] overflow-hidden">
         <aside className="flex flex-col overflow-hidden border-r">
           <div className="border-b px-4 py-2 text-sm font-medium text-muted-foreground">
-            Open issues {issues.length > 0 && `(${issues.length})`}
+            {issueState === "open" ? "Open" : "Closed"} issues {issues.length > 0 && `(${issues.length})`}
           </div>
           <div className="flex-1 space-y-2 overflow-auto p-3">
             {loading ? (
@@ -302,7 +317,9 @@ export default function DashboardPage() {
               <div className="p-4 text-sm text-muted-foreground">
                 {loadingRepos
                   ? "Loading repositories…"
-                  : `No open issues found for ${selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "the selected repository"}.`}
+                  : issueState === "open"
+                    ? `No open issues found for ${selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "the selected repository"}.`
+                    : `No closed issues you've worked on for ${selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "the selected repository"}.`}
               </div>
             ) : (
               issues.map((issue) => (
