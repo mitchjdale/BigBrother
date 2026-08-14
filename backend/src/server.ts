@@ -1,5 +1,6 @@
 import express from "express";
 import { pinoHttp } from "pino-http";
+import rateLimit from "express-rate-limit";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { logger, log } from "./logger.js";
@@ -19,6 +20,13 @@ import type { RepoRef } from "./types.js";
 
 const httpLog = log("http");
 const app = express();
+const reviewRequestLimiter = rateLimit({
+  windowMs: 10_000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "review request is rate-limited; try again shortly" },
+});
 
 // Structured per-request logging (method, url, status, latency). Health checks
 // are logged at debug to keep the stream readable.
@@ -288,7 +296,7 @@ app.post("/plans/:id/refresh-execution", async (req, res) => {
 });
 
 // --- Request (or re-request) Copilot code review on the draft PR ---
-app.post("/plans/:id/review", async (req, res) => {
+app.post("/plans/:id/review", reviewRequestLimiter, async (req, res) => {
   const planId = Number(req.params.id);
   const plan = db.prepare(`SELECT id FROM plans WHERE id=?`).get(planId) as { id: number } | undefined;
   if (!plan) return res.status(404).json({ error: "plan not found" });
