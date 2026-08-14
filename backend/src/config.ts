@@ -44,6 +44,7 @@ export const config = {
   copilotSessionStore: expandHome(env("COPILOT_SESSION_STORE", "~/.copilot/session-store.db")),
   usdPerAiu: Number(env("USD_PER_AIU", "0")),
   sqlitePath: path.resolve(expandHome(env("SQLITE_PATH", "./data/bigbrother.db"))),
+  logLevel: env("LOG_LEVEL", "info"),
 };
 
 export type Config = typeof config;

@@ -4,10 +4,12 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { config } from "./config.js";
 import { cloneUrl, copilotEnv } from "./auth.js";
+import { log } from "./logger.js";
 import type { Issue, RepoRef, Usage } from "./types.js";
 import { captureUsageByCwd } from "./usage.js";
 
 const run = promisify(execFile);
+const copilotLog = log("copilot");
 
 // Tools denied during planning so the agent physically cannot modify the repo.
 const READ_ONLY_DENY = [
@@ -90,6 +92,7 @@ export async function generatePlan(
   try {
     const url = cloneUrl(repo.owner, repo.name);
 
+    copilotLog.debug({ repo: `${repo.owner}/${repo.name}`, base: repo.base, cwd }, "cloning repo");
     await run("git", ["clone", "--depth", "1", "--branch", repo.base, url, cwd], {
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -106,6 +109,10 @@ export async function generatePlan(
     const selectedModel = opts.model === undefined ? config.planModel : opts.model;
     if (selectedModel) args.push("--model", selectedModel);
 
+    copilotLog.debug(
+      { issue: issue.number, model: selectedModel || "auto" },
+      "running Copilot CLI (read-only plan)",
+    );
     let stdout: string;
     try {
       ({ stdout } = await run("copilot", args, {
@@ -117,6 +124,7 @@ export async function generatePlan(
       // The Copilot session may still have recorded token usage before failing;
       // capture it so the cost is retained (issue #11).
       const usage = safeCaptureUsage(cwd, startedAt);
+      copilotLog.error({ err, issue: issue.number }, "Copilot CLI plan run failed");
       throw new PlanError(err instanceof Error ? err.message : String(err), usage);
     }
 

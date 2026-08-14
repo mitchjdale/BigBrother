@@ -92,6 +92,7 @@ are stripped before those subprocesses run.
 ```
 src/
   config.ts    env loading; resolves GH_TOKEN (falls back to `gh auth token`)
+  logger.ts    pino structured logger (JSON in prod, pretty in dev) + child loggers
   auth.ts      per-tool credential routing (token-kind detection, clone URL, subprocess env)
   db.ts        better-sqlite3 schema init (plans / plan_versions / jobs / prs)
   github.ts    Octokit — list & get issues
@@ -128,6 +129,24 @@ src/
 | `COPILOT_SESSION_STORE` | `~/.copilot/session-store.db` | CLI usage store for cost capture |
 | `USD_PER_AIU` | `0` | USD per AI Unit for a dollar figure (0 = report AIU/tokens only) |
 | `SQLITE_PATH` | `./data/bigbrother.db` | app database file |
+| `LOG_LEVEL` | `info` | pino level: `trace`/`debug`/`info`/`warn`/`error`/`fatal`/`silent` |
+| `LOG_PRETTY` | *(auto)* | `false` forces JSON logs in dev; JSON is always used when `NODE_ENV=production` |
+
+## Logging
+
+Structured logging uses [**pino**](https://getpino.io) (`src/logger.ts`) with
+[`pino-http`](https://github.com/pinojs/pino-http) for per-request logs.
+
+- **Development:** human-readable, colourised output (`pino-pretty`).
+- **Production (`NODE_ENV=production`):** newline-delimited **JSON** on stdout, ready to
+  ship to Datadog, Grafana Loki, ELK/OpenSearch, CloudWatch, etc. — no code changes needed.
+- Every HTTP request is logged with method, url, status and latency (`/health` is muted);
+  4xx → `warn`, 5xx/errors → `error`.
+- Domain events carry structured context via child loggers (`module`, `jobId`, `planId`,
+  `issueNumber`, `repo`): plan/execute jobs log queued → started → succeeded/**failed**,
+  and all exceptions are logged with the full error. Secrets (tokens, auth headers) are
+  redacted.
+- Tune verbosity with `LOG_LEVEL` (e.g. `LOG_LEVEL=debug` to see clone / CLI-invocation logs).
 
 ## Requirements
 - Node ≥ 20, `git`, and the `copilot` + `gh` CLIs on PATH.

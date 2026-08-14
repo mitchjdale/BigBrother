@@ -1,5 +1,6 @@
 import { config } from "./config.js";
 import { db } from "./db.js";
+import { log } from "./logger.js";
 import { generatePlan, PlanError } from "./copilot.js";
 import { getIssue } from "./github.js";
 import { enqueuePlan } from "./queue.js";
@@ -122,8 +123,18 @@ export function schedulePlanJob(
 
   db.prepare(`UPDATE plans SET status='planning', updated_at=datetime('now') WHERE id=?`).run(planId);
 
+  const jobLog = log("planner").child({
+    jobId,
+    planId,
+    issueNumber: plan.issue_number,
+    repo: `${plan.repo_owner}/${plan.repo_name}`,
+    kind: opts.feedback ? "regenerate" : "generate",
+  });
+  jobLog.info("plan job queued");
+
   enqueuePlan(async () => {
     db.prepare(`UPDATE jobs SET status='running', updated_at=datetime('now') WHERE id=?`).run(jobId);
+    jobLog.info({ model: opts.model ?? config.planModel ?? "auto" }, "plan job started");
     try {
       const targetRepo: RepoRef = {
         owner: plan.repo_owner,
@@ -188,11 +199,24 @@ export function schedulePlanJob(
       db.prepare(
         `UPDATE plans SET status='ready', current_version_id=?, error=NULL, updated_at=datetime('now') WHERE id=?`,
       ).run(versionId, planId);
+      jobLog.info(
+        {
+          versionNo,
+          source,
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+          aiu: result.usage.nanoAiu / 1e9,
+          model: result.usage.model,
+          durationMs: result.usage.durationMs,
+        },
+        "plan job succeeded",
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // A failed attempt may still have consumed tokens — retain that spend on
       // the job row so it counts toward cumulative usage (issue #11).
       const usage = err instanceof PlanError ? err.usage : null;
+      jobLog.error({ err, tokensSpent: usage?.inputTokens ?? 0 }, "plan job failed");
       db.prepare(
         `UPDATE plans SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`,
       ).run(msg, planId);
