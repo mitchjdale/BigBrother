@@ -33,7 +33,6 @@ export interface PlanVersionMeta {
 }
 
 export type PlanStatus = "idle" | "planning" | "ready" | "executing" | "pr_open" | "failed";
-
 export interface PlanView {
   id: number;
   issueNumber: number;
@@ -64,8 +63,57 @@ export interface PlanView {
   versions: PlanVersionMeta[];
 }
 
-const BASE = "/api";
+export type UsageGranularity = "day" | "week";
 
+export interface UsageBucket {
+  bucket: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  aiu: number;
+  usd: number | null;
+  attempts: number;
+}
+
+export interface RepoUsage {
+  owner: string;
+  name: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  aiu: number;
+  usd: number | null;
+  attempts: number;
+}
+
+export interface UsageReport {
+  granularity: UsageGranularity;
+  from: string | null;
+  to: string | null;
+  usdPerAiu: number;
+  summary: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    aiu: number;
+    usd: number | null;
+    attempts: number;
+    failedAttempts: number;
+    plans: number;
+    repos: number;
+  };
+  series: UsageBucket[];
+  repos: RepoUsage[];
+}
+
+export interface UsageParams {
+  repo?: RepoRef | null;
+  from?: string;
+  to?: string;
+  granularity?: UsageGranularity;
+}
+
+const BASE = "/api";
 function repoQuery(repo: RepoRef): string {
   const params = new URLSearchParams({
     repoOwner: repo.owner,
@@ -148,4 +196,17 @@ export const api = {
 
   refreshExecution: (planId: number) =>
     fetch(`${BASE}/plans/${planId}/refresh-execution`, { method: "POST" }).then(json<PlanView>),
+
+  getUsage: (params: UsageParams = {}) => {
+    const qs = new URLSearchParams();
+    if (params.repo) {
+      qs.set("repoOwner", params.repo.owner);
+      qs.set("repoName", params.repo.name);
+    }
+    if (params.from) qs.set("from", params.from);
+    if (params.to) qs.set("to", params.to);
+    if (params.granularity) qs.set("granularity", params.granularity);
+    const q = qs.toString();
+    return fetch(`${BASE}/usage${q ? `?${q}` : ""}`).then(json<UsageReport>);
+  },
 };

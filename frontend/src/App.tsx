@@ -1,288 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Issue, type PlanStatus, type RepoRef } from "@/api/client";
-import { IssueCard } from "@/components/IssueCard";
-import { PlanPanel } from "@/components/PlanPanel";
-import { Button } from "@/components/ui/button";
-import { Eye, Loader2, RefreshCw } from "lucide-react";
+import { NavLink, Route, Routes } from "react-router-dom";
+import DashboardPage from "@/pages/DashboardPage";
+import UsagePage from "@/pages/UsagePage";
+import { BarChart3, Eye, ListChecks } from "lucide-react";
 
-interface PlanRef {
-  planId: number;
-  status: PlanStatus;
+function navClass({ isActive }: { isActive: boolean }): string {
+  return `inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+    isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
+  }`;
 }
 
-const MODEL_OPTIONS = [
-  { label: "Copilot default (auto)", value: "" },
-  { label: "GPT-5.5", value: "gpt-5.5" },
-  { label: "GPT-5.3-Codex", value: "gpt-5.3-codex" },
-  { label: "GPT-5 mini", value: "gpt-5-mini" },
-  { label: "Claude Sonnet 5", value: "claude-sonnet-5" },
-  { label: "Claude Sonnet 4.5", value: "claude-sonnet-4.5" },
-  { label: "Claude Opus 4.8", value: "claude-opus-4.8" },
-  { label: "Claude Haiku 4.5", value: "claude-haiku-4.5" },
-  { label: "Gemini 3.1 Pro Preview", value: "gemini-3.1-pro-preview" },
-];
-
 export default function App() {
-  const [repoOptions, setRepoOptions] = useState<RepoRef[]>([]);
-  const [selectedOwner, setSelectedOwner] = useState("");
-  const [selectedRepoName, setSelectedRepoName] = useState("");
-  const [loadingRepos, setLoadingRepos] = useState(true);
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [plans, setPlans] = useState<Record<number, PlanRef>>({});
-  const [creating, setCreating] = useState<Record<number, boolean>>({});
-  const [selected, setSelected] = useState<number | null>(null);
-  const [planningModel, setPlanningModel] = useState<string | null>(null);
-  const [executionModel, setExecutionModel] = useState<string | null>(null);
-  const pollers = useRef<Record<number, number>>({});
-  const ownerOptions = [...new Set(repoOptions.map((r) => r.owner))];
-  const reposForOwner = repoOptions.filter((r) => r.owner === selectedOwner);
-  const selectedRepo =
-    repoOptions.find((r) => r.owner === selectedOwner && r.name === selectedRepoName) ?? null;
-
-  const clearPollers = useCallback(() => {
-    const current = pollers.current;
-    Object.values(current).forEach((t) => window.clearInterval(t));
-    pollers.current = {};
-  }, []);
-
-  const loadIssues = useCallback(async () => {
-    if (!selectedRepo) {
-      setIssues([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      setIssues(await api.listIssues(selectedRepo));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedRepo]);
-
-  useEffect(() => {
-    return () => clearPollers();
-  }, [clearPollers]);
-
-  const trackPlan = useCallback((issueNumber: number, planId: number) => {
-    if (pollers.current[issueNumber]) window.clearInterval(pollers.current[issueNumber]);
-    pollers.current[issueNumber] = window.setInterval(async () => {
-      try {
-        const p = await api.getPlan(planId);
-        setPlans((prev) => ({ ...prev, [issueNumber]: { planId, status: p.status } }));
-        if (p.status !== "planning" && p.status !== "executing") {
-          window.clearInterval(pollers.current[issueNumber]);
-          delete pollers.current[issueNumber];
-        }
-      } catch {
-        /* keep polling */
-      }
-    }, 2500);
-  }, []);
-
-  // Restore persisted plans after a page/server restart so previously planned
-  // issues still show their plan (issue #7).
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      setLoadingRepos(true);
-      try {
-        const payload = await api.listRepos();
-        if (!active) return;
-        setRepoOptions(payload.repos);
-        setSelectedOwner(payload.defaultRepo.owner);
-        setSelectedRepoName(payload.defaultRepo.name);
-      } catch (e) {
-        if (!active) return;
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (active) setLoadingRepos(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!selectedOwner) return;
-    if (reposForOwner.some((r) => r.name === selectedRepoName)) return;
-    setSelectedRepoName(reposForOwner[0]?.name ?? "");
-  }, [reposForOwner, selectedOwner, selectedRepoName]);
-
-  useEffect(() => {
-    clearPollers();
-    setPlans({});
-    setCreating({});
-    setSelected(null);
-    loadIssues();
-  }, [clearPollers, loadIssues]);
-
-  useEffect(() => {
-    if (!selectedRepo) return;
-    let active = true;
-    (async () => {
-      try {
-        const existing = await api.listPlans(selectedRepo);
-        if (!active) return;
-        const map: Record<number, PlanRef> = {};
-        for (const p of existing) {
-          map[p.issueNumber] = { planId: p.planId, status: p.status };
-          if (p.status === "planning" || p.status === "executing") trackPlan(p.issueNumber, p.planId);
-        }
-        setPlans((prev) => ({ ...map, ...prev }));
-      } catch {
-        /* no persisted plans / backend unavailable — ignore */
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [selectedRepo, trackPlan]);
-
-  const createPlan = async (issue: Issue) => {
-    if (!selectedRepo) return;
-    setCreating((c) => ({ ...c, [issue.number]: true }));
-    try {
-      const { planId, status } = await api.createPlan(issue.number, selectedRepo, planningModel);
-      setPlans((prev) => ({ ...prev, [issue.number]: { planId, status } }));
-      setSelected(issue.number);
-      trackPlan(issue.number, planId);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCreating((c) => ({ ...c, [issue.number]: false }));
-    }
-  };
-
-  const selectedPlanId = selected != null ? plans[selected]?.planId : undefined;
-
   return (
     <div className="mx-auto flex h-screen max-w-[1400px] flex-col">
-      <header className="flex items-center justify-between border-b px-6 py-4">
-        <div>
-          <h1 className="text-xl font-bold">BigBrother</h1>
-          <p className="text-sm text-muted-foreground">AI implementation planning for your tickets</p>
-        </div>
-        <div className="flex items-end gap-3">
-          <label className="grid gap-1 text-xs text-muted-foreground">
-            Owner
-            <select
-              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
-              value={selectedOwner}
-              onChange={(e) => setSelectedOwner(e.target.value)}
-              disabled={loadingRepos || ownerOptions.length === 0}
-            >
-              {ownerOptions.map((owner) => (
-                <option key={owner} value={owner}>
-                  {owner}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid gap-1 text-xs text-muted-foreground">
-            Repository
-            <select
-              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
-              value={selectedRepoName}
-              onChange={(e) => setSelectedRepoName(e.target.value)}
-              disabled={loadingRepos || reposForOwner.length === 0}
-            >
-              {reposForOwner.map((repo) => (
-                <option key={`${repo.owner}/${repo.name}`} value={repo.name}>
-                  {repo.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid gap-1 text-xs text-muted-foreground">
-            Planning model
-            <select
-              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
-              value={planningModel ?? ""}
-              onChange={(e) => setPlanningModel(e.target.value || null)}
-            >
-              {MODEL_OPTIONS.map((m) => (
-                <option key={m.value || "auto-plan"} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid gap-1 text-xs text-muted-foreground">
-            Execution model
-            <select
-              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
-              value={executionModel ?? ""}
-              onChange={(e) => setExecutionModel(e.target.value || null)}
-            >
-              {MODEL_OPTIONS.map((m) => (
-                <option key={m.value || "auto-exec"} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button variant="outline" size="sm" onClick={loadIssues}>
-            <RefreshCw className="h-4 w-4" /> Refresh issues
-          </Button>
-        </div>
-      </header>
-
-      <div className="grid flex-1 grid-cols-[minmax(320px,420px)_1fr] overflow-hidden">
-        <aside className="flex flex-col overflow-hidden border-r">
-          <div className="border-b px-4 py-2 text-sm font-medium text-muted-foreground">
-            Open issues {issues.length > 0 && `(${issues.length})`}
+      <div className="flex items-center justify-between gap-4 border-b px-6 py-3">
+        <div className="flex items-center gap-2">
+          <Eye className="h-5 w-5" />
+          <div>
+            <h1 className="text-lg font-bold leading-none">BigBrother</h1>
+            <p className="text-xs text-muted-foreground">AI implementation planning for your tickets</p>
           </div>
-          <div className="flex-1 space-y-2 overflow-auto p-3">
-            {loading ? (
-              <div className="flex items-center gap-2 p-4 text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading issues…
-              </div>
-            ) : error ? (
-              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
-            ) : issues.length === 0 ? (
-              <div className="p-4 text-sm text-muted-foreground">
-                {loadingRepos
-                  ? "Loading repositories…"
-                  : `No open issues found for ${selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "the selected repository"}.`}
-              </div>
-            ) : (
-              issues.map((issue) => (
-                <IssueCard
-                  key={issue.number}
-                  issue={issue}
-                  status={plans[issue.number]?.status}
-                  selected={selected === issue.number}
-                  busy={!!creating[issue.number]}
-                  onCreatePlan={() => createPlan(issue)}
-                  onSelect={() => setSelected(issue.number)}
-                />
-              ))
-            )}
-          </div>
-        </aside>
-
-        <main className="overflow-auto p-6">
-          {selectedPlanId ? (
-            <PlanPanel
-              key={selectedPlanId}
-              planId={selectedPlanId}
-              planningModel={planningModel}
-              executionModel={executionModel}
-            />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-              <Eye className="h-8 w-8" />
-              <p>Select an issue and press "Create plan" to begin.</p>
-            </div>
-          )}
-        </main>
+        </div>
+        <nav className="flex items-center gap-1">
+          <NavLink to="/" end className={navClass}>
+            <ListChecks className="h-4 w-4" /> Dashboard
+          </NavLink>
+          <NavLink to="/usage" className={navClass}>
+            <BarChart3 className="h-4 w-4" /> Usage
+          </NavLink>
+        </nav>
       </div>
+
+      <Routes>
+        <Route path="/" element={<DashboardPage />} />
+        <Route path="/usage" element={<UsagePage />} />
+      </Routes>
     </div>
   );
 }
