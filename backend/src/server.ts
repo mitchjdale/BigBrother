@@ -15,7 +15,7 @@ import {
   listLatestPlansByIssue,
   deletePlan,
 } from "./planner.js";
-import { scheduleExecuteJob, refreshExecution } from "./execute.js";
+import { scheduleExecuteJob, refreshExecution, requestReviewForPlan } from "./execute.js";
 import { getUsageReport, type Granularity } from "./reports.js";
 import type { RepoRef } from "./types.js";
 
@@ -27,6 +27,13 @@ const clearPlanLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "too many requests" },
+});
+const reviewRequestLimiter = rateLimit({
+  windowMs: 10_000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "review request is rate-limited; try again shortly" },
 });
 
 // Structured per-request logging (method, url, status, latency). Health checks
@@ -105,6 +112,16 @@ function queryToRecord(query: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+function parseIssueState(query: Record<string, unknown>): {
+  state: "open" | "closed" | "all";
+  error: string | null;
+} {
+  const raw = typeof query.state === "string" ? query.state.trim().toLowerCase() : "";
+  if (!raw) return { state: "all", error: null };
+  if (raw === "open" || raw === "closed" || raw === "all") return { state: raw, error: null };
+  return { state: "all", error: "state must be one of: open, closed, all" };
+}
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -126,8 +143,10 @@ app.get("/repos", async (_req, res) => {
 app.get("/repos/issues", async (req, res) => {
   const parsedRepo = parseRepo(queryToRecord(req.query as Record<string, unknown>));
   if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
+  const parsedState = parseIssueState(req.query as Record<string, unknown>);
+  if (parsedState.error) return res.status(400).json({ error: parsedState.error });
   try {
-    res.json(await listIssues(parsedRepo.repo));
+    res.json(await listIssues(parsedRepo.repo, parsedState.state));
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }
@@ -305,6 +324,22 @@ app.post("/plans/:id/execute", (req, res) => {
 app.post("/plans/:id/refresh-execution", async (req, res) => {
   const planId = Number(req.params.id);
   await refreshExecution(planId);
+  const view = getPlanView(planId);
+  if (!view) return res.status(404).json({ error: "plan not found" });
+  res.json(view);
+});
+
+// --- Request (or re-request) Copilot code review on the draft PR ---
+app.post("/plans/:id/review", reviewRequestLimiter, async (req, res) => {
+  const planId = Number(req.params.id);
+  const plan = db.prepare(`SELECT id FROM plans WHERE id=?`).get(planId) as { id: number } | undefined;
+  if (!plan) return res.status(404).json({ error: "plan not found" });
+
+  const result = await requestReviewForPlan(planId, { force: true });
+  if (result === "no_pr" || result === "not_found") {
+    return res.status(409).json({ error: "no PR to review yet" });
+  }
+
   const view = getPlanView(planId);
   if (!view) return res.status(404).json({ error: "plan not found" });
   res.json(view);

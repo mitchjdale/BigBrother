@@ -44,6 +44,7 @@ export interface PlanView {
     url: string | null;
     branch: string | null;
     agentState: string | null;
+    reviewState: string | null;
     screenshotUrl: string | null;
   } | null;
   currentPlan: {
@@ -157,7 +158,15 @@ export const api = {
   listRepos: () =>
     fetch(`${BASE}/repos`).then(json<{ defaultRepo: RepoRef; repos: RepoRef[] }>),
 
-  listIssues: (repo: RepoRef) => fetch(`${BASE}/repos/issues${repoQuery(repo)}`).then(json<Issue[]>),
+  listIssues: (repo: RepoRef, state: "open" | "closed" | "all" = "all") => {
+    const params = new URLSearchParams({
+      repoOwner: repo.owner,
+      repoName: repo.name,
+      repoBase: repo.base,
+      state,
+    });
+    return fetch(`${BASE}/repos/issues?${params.toString()}`).then(json<Issue[]>);
+  },
 
   listPlans: (repo: RepoRef) =>
     fetch(`${BASE}/plans${repoQuery(repo)}`).then(
@@ -226,6 +235,9 @@ export const api = {
 
   refreshExecution: (planId: number) =>
     fetch(`${BASE}/plans/${planId}/refresh-execution`, { method: "POST" }).then(json<PlanView>),
+
+  requestReview: (planId: number) =>
+    fetch(`${BASE}/plans/${planId}/review`, { method: "POST" }).then(json<PlanView>),
 
   getUsage: (params: UsageParams = {}) => {
     const qs = new URLSearchParams();

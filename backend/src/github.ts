@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import type { Issue, RepoRef } from "./types.js";
 
 const octokit = new Octokit({ auth: config.ghToken || undefined });
+export const COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]";
 
 function normalizeRepo(repo?: Partial<RepoRef>): RepoRef {
   return {
@@ -12,13 +13,16 @@ function normalizeRepo(repo?: Partial<RepoRef>): RepoRef {
   };
 }
 
-export async function listIssues(repo?: Partial<RepoRef>): Promise<Issue[]> {
+export async function listIssues(
+  repo?: Partial<RepoRef>,
+  state: "open" | "closed" | "all" = "all",
+): Promise<Issue[]> {
   const target = normalizeRepo(repo);
   const res = await octokit.issues.listForRepo({
     owner: target.owner,
     repo: target.name,
-    state: "open",
-    per_page: 50,
+    state,
+    per_page: 100,
   });
   return res.data
     .filter((i) => !i.pull_request) // exclude PRs (the issues API returns both)
@@ -76,4 +80,14 @@ export async function getIssue(number: number, repo?: Partial<RepoRef>): Promise
     url: i.html_url,
     labels: i.labels.map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean),
   };
+}
+
+export async function requestCopilotReview(prNumber: number, repo?: Partial<RepoRef>): Promise<void> {
+  const target = normalizeRepo(repo);
+  await octokit.pulls.requestReviewers({
+    owner: target.owner,
+    repo: target.name,
+    pull_number: prNumber,
+    reviewers: [COPILOT_REVIEWER],
+  });
 }
