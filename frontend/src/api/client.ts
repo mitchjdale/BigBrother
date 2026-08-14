@@ -44,6 +44,7 @@ export interface PlanView {
     url: string | null;
     branch: string | null;
     agentState: string | null;
+    reviewState: string | null;
     screenshotUrl: string | null;
   } | null;
   currentPlan: {
@@ -218,6 +219,9 @@ export const api = {
 
   refreshExecution: (planId: number) =>
     fetch(`${BASE}/plans/${planId}/refresh-execution`, { method: "POST" }).then(json<PlanView>),
+
+  requestReview: (planId: number) =>
+    fetch(`${BASE}/plans/${planId}/review`, { method: "POST" }).then(json<PlanView>),
 
   getUsage: (params: UsageParams = {}) => {
     const qs = new URLSearchParams();

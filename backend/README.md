@@ -19,7 +19,8 @@ POST /issues/:n/plan ──▶ queue (concurrent) ──▶ plan worker:
 GET /plans/:id ──▶ status + plan markdown + per-version & total cost + PR
 
 POST /plans/:id/execute ──▶ execute worker:
-    gh agent-task create -F <approved plan>  ──▶ draft PR  ──▶ status = pr_open
+    gh agent-task create -F <approved plan>  ──▶ draft PR
+    (best-effort request Copilot PR review)   ──▶ status = pr_open
 ```
 
 Planning is **read-only**: the `write`, `git commit`, `git push`, `rm`, `mv` tools are
@@ -96,7 +97,11 @@ are stripped before those subprocesses run.
 | PATCH | `/plans/:id/version` | `{ markdown }` → developer-edited version (M3) |
 | POST | `/plans/:id/execute` | approve (`{ model?: string|null }`) → Copilot cloud agent → draft PR (M4) |
 | POST | `/plans/:id/refresh-execution` | re-poll agent task for the draft PR / state; also re-captures implementation token usage (M4, #18) |
+| POST | `/plans/:id/review` | request (or re-request) Copilot code review on the latest draft PR for this plan |
 | GET  | `/usage` | aggregated planning + implementation token/AIU usage split by phase, with time series + per-repo breakdown (optional `repoOwner`/`repoName`/`from`/`to`/`granularity`) (#18) |
+
+`/plans/:id/review` (and the automatic review request during execute/refresh) is best-effort: it requires
+repo permission to request PR reviewers plus Copilot code review enabled for the repo/org.
 
 ## Not in this milestone
 - Playwright screenshot on the PR — **M5**
@@ -130,7 +135,7 @@ src/
 | `plans` | one row per issue plan: `status` (idle/planning/ready/executing/pr_open/failed), `current_version_id`, `error` |
 | `plan_versions` | each plan revision: `markdown`, `source` (generated/regenerated/user_edited), `feedback_prompt`, `input_tokens`, `output_tokens`, `nano_aiu`, `model`, `duration_ms` |
 | `jobs` | queued/running plan & execute jobs: `type`, `status`, `session_id`, `error`, plus per-attempt cost (`input_tokens`, `output_tokens`, `nano_aiu`, `model`, `duration_ms`). Cumulative plan cost is summed from these so failed/superseded attempts are retained (#11) |
-| `prs` | execution result: `session_ref`, `pr_number`, `url`, `branch`, `agent_state`, `screenshot_url` |
+| `prs` | execution result: `session_ref`, `pr_number`, `url`, `branch`, `agent_state`, review status/error (`review_state`, `review_error`), `screenshot_url` |
 
 ## Environment variables (`.env`)
 
@@ -144,6 +149,7 @@ src/
 | `WORK_DIR` | `./.work` | per-job clone dir (unique subdir, deleted after) |
 | `PLAN_MODEL` | *(auto)* | pin a Copilot model for planning |
 | `EXECUTE_MODEL` | *(auto)* | pin a Copilot model for execution |
+| `COPILOT_REVIEW` | `true` | when `true`, automatically request `copilot-pull-request-reviewer[bot]` on newly discovered draft PRs (best-effort) |
 | `COPILOT_SESSION_STORE` | `~/.copilot/session-store.db` | CLI usage store for cost capture |
 | `USD_PER_AIU` | `0` | USD per AI Unit for a dollar figure (0 = report AIU/tokens only) |
 | `MODEL_PRICING` | *(built-in)* | JSON overriding the rough per-model USD/1M-token rates used for cost estimates (#19) |

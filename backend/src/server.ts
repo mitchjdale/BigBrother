@@ -13,7 +13,7 @@ import {
   getLatestPlanIdForIssue,
   listLatestPlansByIssue,
 } from "./planner.js";
-import { scheduleExecuteJob, refreshExecution } from "./execute.js";
+import { scheduleExecuteJob, refreshExecution, requestReviewForPlan } from "./execute.js";
 import { getUsageReport, type Granularity } from "./reports.js";
 import type { RepoRef } from "./types.js";
 
@@ -282,6 +282,22 @@ app.post("/plans/:id/execute", (req, res) => {
 app.post("/plans/:id/refresh-execution", async (req, res) => {
   const planId = Number(req.params.id);
   await refreshExecution(planId);
+  const view = getPlanView(planId);
+  if (!view) return res.status(404).json({ error: "plan not found" });
+  res.json(view);
+});
+
+// --- Request (or re-request) Copilot code review on the draft PR ---
+app.post("/plans/:id/review", async (req, res) => {
+  const planId = Number(req.params.id);
+  const plan = db.prepare(`SELECT id FROM plans WHERE id=?`).get(planId) as { id: number } | undefined;
+  if (!plan) return res.status(404).json({ error: "plan not found" });
+
+  const result = await requestReviewForPlan(planId, { force: true });
+  if (result === "no_pr" || result === "not_found") {
+    return res.status(409).json({ error: "no PR to review yet" });
+  }
+
   const view = getPlanView(planId);
   if (!view) return res.status(404).json({ error: "plan not found" });
   res.json(view);
