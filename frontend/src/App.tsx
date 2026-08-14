@@ -2,11 +2,12 @@ import { NavLink, useLocation } from "react-router-dom";
 import DashboardPage from "@/pages/DashboardPage";
 import UsagePage from "@/pages/UsagePage";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { BarChart3, Eye, ListChecks } from "lucide-react";
+import { BarChart3, ListChecks } from "lucide-react";
+import insigniaLogo from "@/assets/insignia-logo.png";
 
 function navClass({ isActive }: { isActive: boolean }): string {
   return `inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-    isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
+    isActive ? "bg-primary text-primary-foreground" : "text-[#57606a] hover:bg-black/5 dark:text-[#8b949e] dark:hover:bg-white/10"
   }`;
 }
 
@@ -15,13 +16,13 @@ export default function App() {
   const isUsage = pathname === "/usage";
 
   return (
-    <div className="mx-auto flex h-screen max-w-[1400px] flex-col">
-      <div className="flex items-center justify-between gap-4 border-b px-6 py-3">
+    <div className="flex h-screen flex-col">
+      <header className="flex w-full items-center justify-between gap-4 border-b bg-[#f6f8fa] px-6 py-3 text-[#24292f] dark:bg-[#161b22] dark:text-[#e6edf3]">
         <div className="flex items-center gap-2">
-          <Eye className="h-5 w-5" />
+          <img src={insigniaLogo} alt="Insignia Financial" className="h-7 w-7" />
           <div>
             <h1 className="text-lg font-bold leading-none">BigBrother</h1>
-            <p className="text-xs text-muted-foreground">AI implementation planning for your tickets</p>
+            <p className="mt-1 text-xs text-[#57606a] dark:text-[#8b949e]">AI implementation planning for your tickets</p>
           </div>
         </div>
         <nav className="flex items-center gap-1">
@@ -35,13 +36,15 @@ export default function App() {
             <ThemeToggle />
           </div>
         </nav>
-      </div>
+      </header>
 
-      <div className={isUsage ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
-        <DashboardPage />
-      </div>
-      <div className={isUsage ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        <UsagePage />
+      <div className="mx-auto flex min-h-0 w-full max-w-[1400px] flex-1 flex-col">
+        <div className={isUsage ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
+          <DashboardPage />
+        </div>
+        <div className={isUsage ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+          <UsagePage />
+        </div>
       </div>
     </div>
   );
