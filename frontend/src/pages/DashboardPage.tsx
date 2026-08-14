@@ -77,10 +77,6 @@ export default function DashboardPage({ source, setSource }: Props) {
     "bb.dashboard.planningModel",
     null,
   );
-  const [executionModel, setExecutionModel] = usePersistentState<string | null>(
-    "bb.dashboard.executionModel",
-    null,
-  );
   const pollers = useRef<Record<string, number>>({});
 
   const ownerOptions = [...new Set(repoOptions.map((r) => r.owner))];
@@ -407,20 +403,6 @@ export default function DashboardPage({ source, setSource }: Props) {
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-xs text-muted-foreground">
-            Execution model
-            <select
-              className={selectClass}
-              value={executionModel ?? ""}
-              onChange={(e) => setExecutionModel(e.target.value || null)}
-            >
-              {MODEL_OPTIONS.map((m) => (
-                <option key={m.value || "auto-exec"} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
           <Button
             variant="outline"
             size="sm"
@@ -509,7 +491,6 @@ export default function DashboardPage({ source, setSource }: Props) {
                     key={selectedPlanId}
                     planId={selectedPlanId}
                     planningModel={planningModel}
-                    executionModel={executionModel}
                     onStatusChange={(status) => {
                       if (selected == null || selectedPlanId == null) return;
                       setPlans((prev) => ({

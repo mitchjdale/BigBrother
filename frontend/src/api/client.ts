@@ -292,11 +292,11 @@ export const api = {
       body: JSON.stringify({ markdown }),
     }).then(json<{ planId: number; versionId: number; status: PlanStatus }>),
 
-  execute: (planId: number, model: string | null = null) =>
+  execute: (planId: number) =>
     fetch(`${BASE}/plans/${planId}/execute`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model }),
+      body: JSON.stringify({}),
     }).then(
       json<{ planId: number; status: PlanStatus }>,
     ),
