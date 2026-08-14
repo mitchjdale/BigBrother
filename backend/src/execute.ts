@@ -9,7 +9,8 @@ import { db } from "./db.js";
 import { log } from "./logger.js";
 import { ghAgentEnv } from "./auth.js";
 import { captureUsageBySessionRef } from "./usage.js";
-import { closeIssueAsCompleted, isPullRequestMerged } from "./github.js";
+import { closeIssueAsCompleted, isPullRequestMerged, requestCopilotReview } from "./github.js";
+import type { RepoRef } from "./types.js";
 
 const run = promisify(execFile);
 const execLog = log("execute");
@@ -24,6 +25,8 @@ export interface ParsedAgentTask {
   prNumber: number | null;
   prUrl: string | null;
 }
+
+type ReviewRequestState = "requested" | "failed" | "skipped";
 
 /** Tolerant parser for `gh agent-task` human output (no --json flag exists yet). */
 export function parseAgentTaskOutput(text: string): ParsedAgentTask {
@@ -69,6 +72,33 @@ function recordExecuteUsage(jobId: number, sessionRef: string | null, logger = e
     },
     "recorded implementation token usage",
   );
+}
+
+async function maybeRequestReview(
+  prId: number,
+  prNumber: number | null,
+  repo: Partial<RepoRef>,
+  reviewState: string | null,
+  logger = execLog,
+  opts: { force?: boolean } = {},
+): Promise<ReviewRequestState> {
+  if (!config.copilotReview || !prNumber) return "skipped";
+  if (!opts.force && reviewState === "requested") return "skipped";
+  try {
+    await requestCopilotReview(prNumber, repo);
+    db.prepare(
+      `UPDATE prs SET review_state='requested', review_error=NULL, updated_at=datetime('now') WHERE id=?`,
+    ).run(prId);
+    logger.info({ prId, prNumber }, "requested Copilot code review");
+    return "requested";
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    db.prepare(
+      `UPDATE prs SET review_state='failed', review_error=?, updated_at=datetime('now') WHERE id=?`,
+    ).run(message, prId);
+    logger.warn({ err, prId, prNumber }, "failed to request Copilot code review");
+    return "failed";
+  }
 }
 
 /**
@@ -126,17 +156,27 @@ export function scheduleExecuteJob(
 
       const parsed = parseAgentTaskOutput(`${stdout}\n${stderr}`);
 
-      db.prepare(
-        `INSERT INTO prs (plan_id, session_ref, pr_number, url, branch, agent_state, raw_output)
+      const prInfo = db
+        .prepare(
+         `INSERT INTO prs (plan_id, session_ref, pr_number, url, branch, agent_state, raw_output)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        planId,
-        parsed.sessionRef,
+        )
+        .run(
+         planId,
+         parsed.sessionRef,
+         parsed.prNumber,
+         parsed.prUrl,
+         plan.repo_base || config.repo.base,
+         parsed.prUrl ? "pr_open" : "in_progress",
+         stdout.trim(),
+        );
+      const prId = Number(prInfo.lastInsertRowid);
+      await maybeRequestReview(
+        prId,
         parsed.prNumber,
-        parsed.prUrl,
-        plan.repo_base || config.repo.base,
-        parsed.prUrl ? "pr_open" : "in_progress",
-        stdout.trim(),
+        { owner: plan.repo_owner, name: plan.repo_name, base: plan.repo_base || config.repo.base },
+        null,
+        jobLog,
       );
 
       db.prepare(`UPDATE jobs SET status='done', session_id=?, updated_at=datetime('now') WHERE id=?`).run(
@@ -175,7 +215,7 @@ export function scheduleExecuteJob(
 export async function refreshExecution(planId: number): Promise<void> {
   const pr = db
     .prepare(
-      `SELECT pr.id, pr.session_ref, pr.pr_number, p.repo_owner, p.repo_name, p.issue_number
+      `SELECT pr.id, pr.session_ref, pr.pr_number, pr.review_state, p.repo_owner, p.repo_name, p.repo_base, p.issue_number
        FROM prs pr
        JOIN plans p ON p.id = pr.plan_id
        WHERE pr.plan_id=?
@@ -186,8 +226,10 @@ export async function refreshExecution(planId: number): Promise<void> {
         id: number;
         session_ref: string | null;
         pr_number: number | null;
+        review_state: string | null;
         repo_owner: string;
         repo_name: string;
+        repo_base: string | null;
         issue_number: number;
       }
     | undefined;
@@ -208,6 +250,12 @@ export async function refreshExecution(planId: number): Promise<void> {
        db.prepare(
          `UPDATE prs SET pr_number=?, url=?, agent_state='pr_open', updated_at=datetime('now') WHERE id=?`,
        ).run(parsed.prNumber, parsed.prUrl, pr.id);
+       await maybeRequestReview(
+         pr.id,
+         parsed.prNumber,
+         { owner: pr.repo_owner, name: pr.repo_name, base: pr.repo_base || config.repo.base },
+         pr.review_state,
+       );
        db.prepare(`UPDATE plans SET status='pr_open', updated_at=datetime('now') WHERE id=?`).run(planId);
        execLog.info(
          { planId, prNumber: parsed.prNumber, prUrl: parsed.prUrl },
@@ -239,4 +287,38 @@ export async function refreshExecution(planId: number): Promise<void> {
     // best-effort refresh; leave state unchanged on failure
     execLog.warn({ err, planId }, "execute refresh failed (leaving state unchanged)");
   }
+}
+
+export async function requestReviewForPlan(
+  planId: number,
+  opts: { force?: boolean } = {},
+): Promise<"not_found" | "no_pr" | ReviewRequestState> {
+  const pr = db
+    .prepare(
+      `SELECT pr.id, pr.pr_number, pr.review_state, p.repo_owner, p.repo_name, p.repo_base
+       FROM prs pr
+       JOIN plans p ON p.id = pr.plan_id
+       WHERE pr.plan_id=?
+       ORDER BY pr.id DESC LIMIT 1`,
+    )
+    .get(planId) as
+    | {
+        id: number;
+        pr_number: number | null;
+        review_state: string | null;
+        repo_owner: string;
+        repo_name: string;
+        repo_base: string | null;
+      }
+    | undefined;
+  if (!pr) return "not_found";
+  if (!pr.pr_number) return "no_pr";
+  return maybeRequestReview(
+    pr.id,
+    pr.pr_number,
+    { owner: pr.repo_owner, name: pr.repo_name, base: pr.repo_base || config.repo.base },
+    pr.review_state,
+    execLog.child({ planId }),
+    opts,
+  );
 }
