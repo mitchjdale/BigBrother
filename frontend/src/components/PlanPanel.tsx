@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "./StatusBadge";
 import { CostBar } from "./CostBar";
-import { api, type PlanView } from "@/api/client";
+import { api, type PlanStatus, type PlanView } from "@/api/client";
 import { ExternalLink, Loader2, Pencil, RefreshCw, Rocket, RotateCcw, Save, X } from "lucide-react";
 
 const POLL_MS = 2500;
@@ -15,25 +15,39 @@ interface Props {
   planId: number;
   planningModel: string | null;
   executionModel: string | null;
+  onStatusChange?: (status: PlanStatus) => void;
 }
 
-export function PlanPanel({ planId, planningModel, executionModel }: Props) {
+export function PlanPanel({ planId, planningModel, executionModel, onStatusChange }: Props) {
   const [plan, setPlan] = useState<PlanView | null>(null);
   const [feedback, setFeedback] = useState("");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lastStatus = useRef<PlanStatus | null>(null);
+
+  const applyPlan = useCallback(
+    (next: PlanView) => {
+      setPlan(next);
+      if (lastStatus.current !== next.status) {
+        lastStatus.current = next.status;
+        onStatusChange?.(next.status);
+      }
+    },
+    [onStatusChange],
+  );
 
   useEffect(() => {
     let active = true;
     let timer: number | undefined;
+    lastStatus.current = null;
 
     const tick = async () => {
       try {
         const p = await api.getPlan(planId);
         if (!active) return;
-        setPlan(p);
+        applyPlan(p);
         setError(null);
         if (p.status === "planning" || p.status === "executing") {
           timer = window.setTimeout(tick, POLL_MS);
@@ -47,9 +61,9 @@ export function PlanPanel({ planId, planningModel, executionModel }: Props) {
       active = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, [planId]);
+  }, [applyPlan, planId]);
 
-  const refresh = async () => setPlan(await api.getPlan(planId));
+  const refresh = async () => applyPlan(await api.getPlan(planId));
 
   const doRegenerate = async () => {
     if (!feedback.trim()) return;
@@ -105,7 +119,7 @@ export function PlanPanel({ planId, planningModel, executionModel }: Props) {
   const poll = () => {
     const id = window.setInterval(async () => {
       const p = await api.getPlan(planId);
-      setPlan(p);
+      applyPlan(p);
       if (p.status !== "planning" && p.status !== "executing") window.clearInterval(id);
     }, POLL_MS);
   };

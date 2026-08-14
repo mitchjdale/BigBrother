@@ -29,6 +29,8 @@ export function IssueCard({
   onCreatePlan,
   onSelect,
 }: Props) {
+  const isClosed = issue.state === "closed";
+
   return (
     <Card
       className={selected ? "ring-2 ring-ring cursor-pointer" : "cursor-pointer hover:bg-accent/40"}
@@ -61,6 +63,11 @@ export function IssueCard({
             ))}
           </div>
           {status && <StatusBadge status={status} />}
+          {isClosed && (
+            <Badge variant="secondary" className="text-[10px]">
+              Closed
+            </Badge>
+          )}
         </div>
         <div className="flex flex-col items-end gap-2">
           {estimatedUsd != null && estimatedUsd > 0 && (
@@ -74,16 +81,16 @@ export function IssueCard({
           )}
           <Button
             size="sm"
-            disabled={busy || status === "planning"}
+            disabled={busy || status === "planning" || isClosed}
             onClick={(e) => {
               e.stopPropagation();
               onCreatePlan();
             }}
           >
-            {busy || status === "planning" && (
+            {(busy || status === "planning") && (
               <Loader2 className="h-4 w-4 animate-spin" />
             )}
-            Create plan
+            {isClosed ? "Issue closed" : "Create plan"}
           </Button>
         </div>
       </CardContent>
