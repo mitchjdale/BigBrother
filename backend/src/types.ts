@@ -18,6 +18,12 @@ export interface Issue {
   labels: string[];
 }
 
+export interface RepoRef {
+  owner: string;
+  name: string;
+  base: string;
+}
+
 export interface Usage {
   inputTokens: number;
   outputTokens: number;

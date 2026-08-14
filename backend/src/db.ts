@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS plans (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   repo_owner TEXT NOT NULL,
   repo_name TEXT NOT NULL,
+  repo_base TEXT NOT NULL,
   issue_number INTEGER NOT NULL,
   issue_title TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'idle',
@@ -65,8 +66,6 @@ CREATE TABLE IF NOT EXISTS prs (
 `);
 
 // --- Migrations for existing databases ---
-// Track per-attempt token/cost on the jobs table so cumulative usage is
-// retained even when an attempt fails or a plan is re-run (issue #11).
 function ensureColumn(table: string, column: string, ddl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   if (!cols.some((c) => c.name === column)) {
@@ -74,6 +73,20 @@ function ensureColumn(table: string, column: string, ddl: string): void {
   }
 }
 
+// Per-repo plans (UI repository selection, issue #2): backfill repo_base.
+if (
+  !(db.prepare(`PRAGMA table_info(plans)`).all() as { name: string }[]).some(
+    (c) => c.name === "repo_base",
+  )
+) {
+  db.exec(`ALTER TABLE plans ADD COLUMN repo_base TEXT`);
+  db.prepare(`UPDATE plans SET repo_base = ? WHERE repo_base IS NULL OR repo_base = ''`).run(
+    config.repo.base,
+  );
+}
+
+// Track per-attempt token/cost on the jobs table so cumulative usage is
+// retained even when an attempt fails or a plan is re-run (issue #11).
 ensureColumn("jobs", "input_tokens", "input_tokens INTEGER NOT NULL DEFAULT 0");
 ensureColumn("jobs", "output_tokens", "output_tokens INTEGER NOT NULL DEFAULT 0");
 ensureColumn("jobs", "nano_aiu", "nano_aiu INTEGER NOT NULL DEFAULT 0");

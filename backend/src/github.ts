@@ -1,13 +1,22 @@
 import { Octokit } from "@octokit/rest";
 import { config } from "./config.js";
-import type { Issue } from "./types.js";
+import type { Issue, RepoRef } from "./types.js";
 
 const octokit = new Octokit({ auth: config.ghToken || undefined });
 
-export async function listIssues(): Promise<Issue[]> {
+function normalizeRepo(repo?: Partial<RepoRef>): RepoRef {
+  return {
+    owner: repo?.owner ?? config.repo.owner,
+    name: repo?.name ?? config.repo.name,
+    base: repo?.base ?? config.repo.base,
+  };
+}
+
+export async function listIssues(repo?: Partial<RepoRef>): Promise<Issue[]> {
+  const target = normalizeRepo(repo);
   const res = await octokit.issues.listForRepo({
-    owner: config.repo.owner,
-    repo: config.repo.name,
+    owner: target.owner,
+    repo: target.name,
     state: "open",
     per_page: 50,
   });
@@ -23,10 +32,40 @@ export async function listIssues(): Promise<Issue[]> {
     }));
 }
 
-export async function getIssue(number: number): Promise<Issue> {
+export async function listSelectableRepos(): Promise<RepoRef[]> {
+  const defaultRepo = normalizeRepo();
+  try {
+    const res = await octokit.repos.listForAuthenticatedUser({
+      affiliation: "owner,collaborator,organization_member",
+      sort: "updated",
+      per_page: 100,
+    });
+
+    const seen = new Set<string>();
+    const repos: RepoRef[] = [];
+    for (const repo of res.data) {
+      if (!repo.owner?.login || !repo.name || !repo.default_branch) continue;
+      const key = `${repo.owner.login}/${repo.name}`.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      repos.push({ owner: repo.owner.login, name: repo.name, base: repo.default_branch });
+    }
+
+    if (!seen.has(`${defaultRepo.owner}/${defaultRepo.name}`.toLowerCase())) {
+      repos.unshift(defaultRepo);
+    }
+
+    return repos;
+  } catch {
+    return [defaultRepo];
+  }
+}
+
+export async function getIssue(number: number, repo?: Partial<RepoRef>): Promise<Issue> {
+  const target = normalizeRepo(repo);
   const { data: i } = await octokit.issues.get({
-    owner: config.repo.owner,
-    repo: config.repo.name,
+    owner: target.owner,
+    repo: target.name,
     issue_number: number,
   });
   return {

@@ -5,7 +5,8 @@ Node/TypeScript API + async workers behind the ticket-planning dashboard. It gen
 token/AI-Unit cost), lets developers iterate on them, and — on approval — hands the plan
 to the Copilot cloud agent to open a **draft PR**.
 
-Default target repo: `mitchjdale/WealthOlympics` (configurable in `.env`).
+Default target repo: `mitchjdale/WealthOlympics` (configurable in `.env`). The UI can
+override this per run via owner/repository dropdowns.
 
 ## How it works
 
@@ -69,7 +70,8 @@ are stripped before those subprocesses run.
 | Method | Path | Purpose |
 |---|---|---|
 | GET  | `/health` | sanity + token check |
-| GET  | `/repos/issues` | list open issues (M1) |
+| GET  | `/repos` | list selectable repositories (owner/name/base) for the UI dropdowns |
+| GET  | `/repos/issues` | list open issues for the selected repo (M1) |
 | GET  | `/plans` | latest plan per issue (dashboard hydration after reload) |
 | GET  | `/issues/:number/plan` | latest persisted plan for an issue (404 if none) |
 | POST | `/issues/:number/plan` | enqueue a plan (`{ model?: string\|null }`) → `{ planId }` (202). Reuses the issue's existing plan record so token usage accumulates (#11) |
@@ -116,7 +118,7 @@ src/
 | Var | Default | Purpose |
 |---|---|---|
 | `GH_TOKEN` | `gh auth token` | GitHub REST token (issues). Any kind works; non-OAuth tokens are stripped before Copilot planning/execute (see Authentication) |
-| `REPO_OWNER` / `REPO_NAME` / `REPO_BASE` | `mitchjdale` / `WealthOlympics` / `main` | target repo |
+| `REPO_OWNER` / `REPO_NAME` / `REPO_BASE` | `mitchjdale` / `WealthOlympics` / `main` | default repo used when a request does not pass a selected repo |
 | `REPO_PRIVATE` | `false` | `true` embeds `GH_TOKEN` in the clone URL; public repos clone anonymously |
 | `PORT` | `8787` | API port |
 | `PLAN_CONCURRENCY` | `5` | how many plan/execute jobs run in parallel |
