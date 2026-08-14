@@ -3,39 +3,46 @@ import { db } from "./db.js";
 import { generatePlan } from "./copilot.js";
 import { getIssue } from "./github.js";
 import { enqueuePlan } from "./queue.js";
-import type { PlanVersionRow } from "./types.js";
+import type { PlanVersionRow, RepoRef } from "./types.js";
 
 interface PlanRow {
   id: number;
+  repo_owner: string;
+  repo_name: string;
+  repo_base: string;
   issue_number: number;
   status: string;
   current_version_id: number | null;
 }
 
-export function createPlanRecord(issueNumber: number, issueTitle: string): number {
+export function createPlanRecord(issueNumber: number, issueTitle: string, repo: RepoRef): number {
   const info = db
     .prepare(
-      `INSERT INTO plans (repo_owner, repo_name, issue_number, issue_title, status)
-       VALUES (?, ?, ?, ?, 'planning')`,
+      `INSERT INTO plans (repo_owner, repo_name, repo_base, issue_number, issue_title, status)
+       VALUES (?, ?, ?, ?, ?, 'planning')`,
     )
-    .run(config.repo.owner, config.repo.name, issueNumber, issueTitle);
+    .run(repo.owner, repo.name, repo.base, issueNumber, issueTitle);
   return Number(info.lastInsertRowid);
 }
 
 /** Most recent plan id for an issue in the configured repo, or null. */
-export function getLatestPlanIdForIssue(issueNumber: number): number | null {
+export function getLatestPlanIdForIssue(issueNumber: number, repo: RepoRef): number | null {
   const row = db
     .prepare(
       `SELECT id FROM plans
        WHERE repo_owner=? AND repo_name=? AND issue_number=?
        ORDER BY id DESC LIMIT 1`,
     )
-    .get(config.repo.owner, config.repo.name, issueNumber) as { id: number } | undefined;
+    .get(repo.owner, repo.name, issueNumber) as { id: number } | undefined;
   return row?.id ?? null;
 }
 
 /** One entry per issue (its latest plan) for dashboard hydration after a reload. */
-export function listLatestPlansByIssue(): { issueNumber: number; planId: number; status: string }[] {
+export function listLatestPlansByIssue(repo: RepoRef): {
+  issueNumber: number;
+  planId: number;
+  status: string;
+}[] {
   return db
     .prepare(
       `SELECT p.issue_number AS issueNumber, p.id AS planId, p.status AS status
@@ -48,7 +55,7 @@ export function listLatestPlansByIssue(): { issueNumber: number; planId: number;
          )
        ORDER BY p.id DESC`,
     )
-    .all(config.repo.owner, config.repo.name) as {
+    .all(repo.owner, repo.name) as {
     issueNumber: number;
     planId: number;
     status: string;
@@ -99,9 +106,15 @@ export function getCurrentPlanMarkdown(planId: number): string | null {
 /** Run a plan (or regeneration) as a queued, concurrent job. */
 export function schedulePlanJob(
   planId: number,
-  issueNumber: number,
   opts: { feedback?: string; model?: string | null } = {},
 ): void {
+  const plan = db
+    .prepare(`SELECT issue_number, repo_owner, repo_name, repo_base FROM plans WHERE id=?`)
+    .get(planId) as
+    | { issue_number: number; repo_owner: string; repo_name: string; repo_base: string | null }
+    | undefined;
+  if (!plan) throw new Error(`plan ${planId} not found`);
+
   const jobInfo = db
     .prepare(`INSERT INTO jobs (plan_id, type, status) VALUES (?, 'plan', 'queued')`)
     .run(planId);
@@ -112,7 +125,12 @@ export function schedulePlanJob(
   enqueuePlan(async () => {
     db.prepare(`UPDATE jobs SET status='running', updated_at=datetime('now') WHERE id=?`).run(jobId);
     try {
-      const issue = await getIssue(issueNumber);
+      const targetRepo: RepoRef = {
+        owner: plan.repo_owner,
+        name: plan.repo_name,
+        base: plan.repo_base || config.repo.base,
+      };
+      const issue = await getIssue(plan.issue_number, targetRepo);
 
       let previousPlan: string | undefined;
       if (opts.feedback) {
@@ -124,7 +142,7 @@ export function schedulePlanJob(
         previousPlan = prev?.markdown;
       }
 
-      const result = await generatePlan(issue, {
+      const result = await generatePlan(issue, targetRepo, {
         feedback: opts.feedback,
         previousPlan,
         model: opts.model,

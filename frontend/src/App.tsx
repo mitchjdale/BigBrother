@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Issue, type PlanStatus } from "@/api/client";
+import { api, type Issue, type PlanStatus, type RepoRef } from "@/api/client";
 import { IssueCard } from "@/components/IssueCard";
 import { PlanPanel } from "@/components/PlanPanel";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,10 @@ const MODEL_OPTIONS = [
 ];
 
 export default function App() {
+  const [repoOptions, setRepoOptions] = useState<RepoRef[]>([]);
+  const [selectedOwner, setSelectedOwner] = useState("");
+  const [selectedRepoName, setSelectedRepoName] = useState("");
+  const [loadingRepos, setLoadingRepos] = useState(true);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,24 +36,37 @@ export default function App() {
   const [planningModel, setPlanningModel] = useState<string | null>(null);
   const [executionModel, setExecutionModel] = useState<string | null>(null);
   const pollers = useRef<Record<number, number>>({});
+  const ownerOptions = [...new Set(repoOptions.map((r) => r.owner))];
+  const reposForOwner = repoOptions.filter((r) => r.owner === selectedOwner);
+  const selectedRepo =
+    repoOptions.find((r) => r.owner === selectedOwner && r.name === selectedRepoName) ?? null;
+
+  const clearPollers = useCallback(() => {
+    const current = pollers.current;
+    Object.values(current).forEach((t) => window.clearInterval(t));
+    pollers.current = {};
+  }, []);
 
   const loadIssues = useCallback(async () => {
+    if (!selectedRepo) {
+      setIssues([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      setIssues(await api.listIssues());
+      setIssues(await api.listIssues(selectedRepo));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedRepo]);
 
   useEffect(() => {
-    loadIssues();
-    const current = pollers.current;
-    return () => Object.values(current).forEach((t) => window.clearInterval(t));
-  }, [loadIssues]);
+    return () => clearPollers();
+  }, [clearPollers]);
 
   const trackPlan = useCallback((issueNumber: number, planId: number) => {
     if (pollers.current[issueNumber]) window.clearInterval(pollers.current[issueNumber]);
@@ -72,8 +89,45 @@ export default function App() {
   useEffect(() => {
     let active = true;
     (async () => {
+      setLoadingRepos(true);
       try {
-        const existing = await api.listPlans();
+        const payload = await api.listRepos();
+        if (!active) return;
+        setRepoOptions(payload.repos);
+        setSelectedOwner(payload.defaultRepo.owner);
+        setSelectedRepoName(payload.defaultRepo.name);
+      } catch (e) {
+        if (!active) return;
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (active) setLoadingRepos(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedOwner) return;
+    if (reposForOwner.some((r) => r.name === selectedRepoName)) return;
+    setSelectedRepoName(reposForOwner[0]?.name ?? "");
+  }, [reposForOwner, selectedOwner, selectedRepoName]);
+
+  useEffect(() => {
+    clearPollers();
+    setPlans({});
+    setCreating({});
+    setSelected(null);
+    loadIssues();
+  }, [clearPollers, loadIssues]);
+
+  useEffect(() => {
+    if (!selectedRepo) return;
+    let active = true;
+    (async () => {
+      try {
+        const existing = await api.listPlans(selectedRepo);
         if (!active) return;
         const map: Record<number, PlanRef> = {};
         for (const p of existing) {
@@ -88,12 +142,13 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [trackPlan]);
+  }, [selectedRepo, trackPlan]);
 
   const createPlan = async (issue: Issue) => {
+    if (!selectedRepo) return;
     setCreating((c) => ({ ...c, [issue.number]: true }));
     try {
-      const { planId, status } = await api.createPlan(issue.number, planningModel);
+      const { planId, status } = await api.createPlan(issue.number, selectedRepo, planningModel);
       setPlans((prev) => ({ ...prev, [issue.number]: { planId, status } }));
       setSelected(issue.number);
       trackPlan(issue.number, planId);
@@ -114,6 +169,36 @@ export default function App() {
           <p className="text-sm text-muted-foreground">AI implementation planning for your tickets</p>
         </div>
         <div className="flex items-end gap-3">
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Owner
+            <select
+              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
+              value={selectedOwner}
+              onChange={(e) => setSelectedOwner(e.target.value)}
+              disabled={loadingRepos || ownerOptions.length === 0}
+            >
+              {ownerOptions.map((owner) => (
+                <option key={owner} value={owner}>
+                  {owner}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Repository
+            <select
+              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
+              value={selectedRepoName}
+              onChange={(e) => setSelectedRepoName(e.target.value)}
+              disabled={loadingRepos || reposForOwner.length === 0}
+            >
+              {reposForOwner.map((repo) => (
+                <option key={`${repo.owner}/${repo.name}`} value={repo.name}>
+                  {repo.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="grid gap-1 text-xs text-muted-foreground">
             Planning model
             <select
@@ -162,7 +247,9 @@ export default function App() {
               <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
             ) : issues.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground">
-                No open issues found for the configured repository.
+                {loadingRepos
+                  ? "Loading repositories…"
+                  : `No open issues found for ${selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "the selected repository"}.`}
               </div>
             ) : (
               issues.map((issue) => (

@@ -45,6 +45,11 @@ export function scheduleExecuteJob(
   planMarkdown: string,
   opts: { model?: string | null } = {},
 ): void {
+  const plan = db
+    .prepare(`SELECT repo_owner, repo_name, repo_base FROM plans WHERE id=?`)
+    .get(planId) as { repo_owner: string; repo_name: string; repo_base: string | null } | undefined;
+  if (!plan) throw new Error(`plan ${planId} not found`);
+
   const jobInfo = db
     .prepare(`INSERT INTO jobs (plan_id, type, status) VALUES (?, 'execute', 'queued')`)
     .run(planId);
@@ -67,9 +72,9 @@ export function scheduleExecuteJob(
         "--from-file",
         planFile,
         "--repo",
-        `${config.repo.owner}/${config.repo.name}`,
+        `${plan.repo_owner}/${plan.repo_name}`,
         "--base",
-        config.repo.base,
+        plan.repo_base || config.repo.base,
       ];
       const selectedModel = opts.model === undefined ? config.executeModel : opts.model;
       if (selectedModel) args.push("--model", selectedModel);
@@ -86,7 +91,7 @@ export function scheduleExecuteJob(
         parsed.sessionRef,
         parsed.prNumber,
         parsed.prUrl,
-        config.repo.base,
+        plan.repo_base || config.repo.base,
         parsed.prUrl ? "pr_open" : "in_progress",
         stdout.trim(),
       );
@@ -120,14 +125,22 @@ export function scheduleExecuteJob(
  */
 export async function refreshExecution(planId: number): Promise<void> {
   const pr = db
-    .prepare(`SELECT id, session_ref FROM prs WHERE plan_id=? ORDER BY id DESC LIMIT 1`)
-    .get(planId) as { id: number; session_ref: string | null } | undefined;
+    .prepare(
+      `SELECT pr.id, pr.session_ref, p.repo_owner, p.repo_name
+       FROM prs pr
+       JOIN plans p ON p.id = pr.plan_id
+       WHERE pr.plan_id=?
+       ORDER BY pr.id DESC LIMIT 1`,
+    )
+    .get(planId) as
+    | { id: number; session_ref: string | null; repo_owner: string; repo_name: string }
+    | undefined;
   if (!pr?.session_ref) return;
 
   try {
     const { stdout } = await run(
       "gh",
-      ["agent-task", "view", pr.session_ref, "--repo", `${config.repo.owner}/${config.repo.name}`],
+      ["agent-task", "view", pr.session_ref, "--repo", `${pr.repo_owner}/${pr.repo_name}`],
       { env: ghEnv(), maxBuffer: 32 * 1024 * 1024 },
     );
     const parsed = parseAgentTaskOutput(stdout);
