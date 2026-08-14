@@ -2,6 +2,13 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
+// Load backend/.env into process.env (Node >= 20.12 built-in; no dotenv needed).
+try {
+  process.loadEnvFile();
+} catch {
+  // no .env file present — rely on real env vars / gh auth fallback
+}
+
 function env(key: string, fallback = ""): string {
   const v = process.env[key];
   return v === undefined || v === "" ? fallback : v;
@@ -12,7 +19,7 @@ function expandHome(p: string): string {
 }
 
 function resolveGhToken(): string {
-  const fromEnv = env("GH_TOKEN") || env("GITHUB_TOKEN");
+  const fromEnv = env("GH_TOKEN");
   if (fromEnv) return fromEnv;
   try {
     return execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
