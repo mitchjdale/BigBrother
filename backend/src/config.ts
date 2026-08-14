@@ -39,6 +39,7 @@ export const config = {
   planConcurrency: Number(env("PLAN_CONCURRENCY", "5")),
   workDir: path.resolve(expandHome(env("WORK_DIR", "./.work"))),
   planModel: env("PLAN_MODEL"),
+  executeModel: env("EXECUTE_MODEL"),
   copilotSessionStore: expandHome(env("COPILOT_SESSION_STORE", "~/.copilot/session-store.db")),
   usdPerAiu: Number(env("USD_PER_AIU", "0")),
   sqlitePath: path.resolve(expandHome(env("SQLITE_PATH", "./data/bigbrother.db"))),

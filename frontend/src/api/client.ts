@@ -78,18 +78,22 @@ export const api = {
       return json<PlanView>(r);
     }),
 
-  createPlan: (issueNumber: number) =>
-    fetch(`${BASE}/issues/${issueNumber}/plan`, { method: "POST" }).then(
+  createPlan: (issueNumber: number, model: string | null = null) =>
+    fetch(`${BASE}/issues/${issueNumber}/plan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model }),
+    }).then(
       json<{ planId: number; status: PlanStatus }>,
     ),
 
   getPlan: (planId: number) => fetch(`${BASE}/plans/${planId}`).then(json<PlanView>),
 
-  regenerate: (planId: number, feedback: string) =>
+  regenerate: (planId: number, feedback: string, model: string | null = null) =>
     fetch(`${BASE}/plans/${planId}/regenerate`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feedback }),
+      body: JSON.stringify({ feedback, model }),
     }).then(json<{ planId: number; status: PlanStatus }>),
 
   editVersion: (planId: number, markdown: string) =>
@@ -99,8 +103,12 @@ export const api = {
       body: JSON.stringify({ markdown }),
     }).then(json<{ planId: number; versionId: number; status: PlanStatus }>),
 
-  execute: (planId: number) =>
-    fetch(`${BASE}/plans/${planId}/execute`, { method: "POST" }).then(
+  execute: (planId: number, model: string | null = null) =>
+    fetch(`${BASE}/plans/${planId}/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model }),
+    }).then(
       json<{ planId: number; status: PlanStatus }>,
     ),
 

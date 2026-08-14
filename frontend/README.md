@@ -19,6 +19,8 @@ The dev server proxies `/api/*` to `http://localhost:8787` (see `vite.config.ts`
 - Issues column: open issues for the configured repo; each card has Create plan and a
   live status badge (planning -> ready -> executing -> pr_open). Multiple tickets can
   plan concurrently.
+- Header controls: choose planning and execution models independently, or leave either on
+  **Copilot default (auto)** to let Copilot choose.
 - Plan panel: polls status, renders plan markdown, shows a cost bar (AIU, tokens, model,
   duration), and supports:
   - Edit the plan inline -> saved as a new user_edited version.
