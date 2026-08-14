@@ -21,13 +21,14 @@ const READ_ONLY_DENY = [
 ];
 
 function planPrompt(issue: Issue, feedback?: string, previousPlan?: string): string {
-  const base = `You are a senior engineer. Research THIS repository (it is checked out in the current directory) and produce a detailed, actionable implementation plan for the GitHub issue below.
+  const ref = issue.source === "github" ? `#${issue.number}` : issue.key;
+  const base = `You are a senior engineer. Research THIS repository (it is checked out in the current directory) and produce a detailed, actionable implementation plan for the ${issue.source === "jira" ? "JIRA" : "GitHub"} issue below.
 
 Rules:
 - Do NOT modify any files. Output ONLY the plan.
 - Respond in Markdown. Include: Summary, Affected files/areas, Step-by-step tasks, Risks/edge cases, and a Testing strategy.
 
-Issue #${issue.number}: ${issue.title}
+Issue ${ref}: ${issue.title}
 
 ${issue.body ?? "(no description)"}`;
 

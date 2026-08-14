@@ -97,6 +97,32 @@ ensureColumn("jobs", "duration_ms", "duration_ms INTEGER NOT NULL DEFAULT 0");
 ensureColumn("prs", "review_state", "review_state TEXT");
 ensureColumn("prs", "review_error", "review_error TEXT");
 
+// --- Multi-source issues (GitHub Issues + JIRA) ---
+// Issues can now come from GitHub (integer number) or JIRA (string key like
+// "PROJ-123"). `issue_key` is the stable identity for both; `issue_number`
+// remains the GitHub issue number (0 for JIRA rows). `issue_source` selects the
+// provider. Additive + backfilled so existing GitHub plans keep working.
+ensureColumn("plans", "issue_source", "issue_source TEXT NOT NULL DEFAULT 'github'");
+ensureColumn("plans", "issue_key", "issue_key TEXT");
+db.prepare(
+  `UPDATE plans SET issue_key = CAST(issue_number AS TEXT)
+   WHERE issue_key IS NULL OR issue_key = ''`,
+).run();
+
+// Maps a JIRA project to the GitHub repo used to clone (planning) and open the
+// draft PR (execution). Managed from the Settings page. 1 project → 1 repo.
+db.exec(`
+CREATE TABLE IF NOT EXISTS jira_project_map (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_key TEXT NOT NULL UNIQUE,
+  project_name TEXT NOT NULL,
+  repo_owner TEXT NOT NULL,
+  repo_name TEXT NOT NULL,
+  repo_base TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
+
 export function now(): string {
   return new Date().toISOString();
 }

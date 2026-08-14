@@ -23,6 +23,8 @@ function toIssue(i: {
   labels: ({ name?: string | null } | string)[];
 }): Issue {
   return {
+    source: "github",
+    key: String(i.number),
     number: i.number,
     title: i.title,
     body: i.body ?? null,

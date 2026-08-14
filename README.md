@@ -7,8 +7,8 @@
 </p>
 
 **BigBrother is an AI implementation-planning dashboard for developer tickets.**
-Browse a repository's GitHub issues, press **Create plan**, and GitHub Copilot examines
-the actual codebase and produces an implementation plan — asynchronously, with the
+Browse issues from **GitHub Issues or JIRA**, press **Create plan**, and GitHub Copilot
+examines the actual codebase and produces an implementation plan — asynchronously, with the
 **token / AI-Unit cost of every plan tracked**. Review the plan, edit or regenerate it
 with feedback, and when you're happy, press **Execute** to have the Copilot cloud agent
 open a draft pull request based on the approved plan.
@@ -94,6 +94,15 @@ Set default repository + cost settings in `backend/.env`
 The dashboard now lets you pick owner/repository from dropdowns at runtime, and each
 plan/execution uses the selected repo.
 See `backend/README.md` for the full list.
+
+### JIRA as an issue source (optional)
+
+Set `JIRA_BASE_URL`, `JIRA_EMAIL` and `JIRA_API_TOKEN` in `backend/.env` to offer **JIRA**
+alongside GitHub Issues in the dashboard "Source" selector. Because planning clones a git
+repo and execution opens a GitHub PR, the **code repo is always GitHub** — so each JIRA
+project is mapped to a GitHub repo on the **Settings** page. Pick a JIRA project on the
+dashboard and its mapped repo is used to clone + open the draft PR. JIRA credentials stay
+server-side and are never sent to the browser.
 
 ## Status & roadmap
 
