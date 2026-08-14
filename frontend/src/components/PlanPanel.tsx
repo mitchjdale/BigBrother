@@ -14,11 +14,10 @@ const POLL_MS = 15_000;
 interface Props {
   planId: number;
   planningModel: string | null;
-  executionModel: string | null;
   onStatusChange?: (status: PlanStatus) => void;
 }
 
-export function PlanPanel({ planId, planningModel, executionModel, onStatusChange }: Props) {
+export function PlanPanel({ planId, planningModel, onStatusChange }: Props) {
   const [plan, setPlan] = useState<PlanView | null>(null);
   const [feedback, setFeedback] = useState("");
   const [editing, setEditing] = useState(false);
@@ -109,7 +108,7 @@ export function PlanPanel({ planId, planningModel, executionModel, onStatusChang
   const doExecute = async () => {
     setBusy(true);
     try {
-      await api.execute(planId, executionModel);
+      await api.execute(planId);
       await refresh();
       poll();
     } catch (e) {

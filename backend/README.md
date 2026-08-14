@@ -169,7 +169,6 @@ src/
 | `PLAN_CONCURRENCY` | `5` | how many plan/execute jobs run in parallel |
 | `WORK_DIR` | `./.work` | per-job clone dir (unique subdir, deleted after) |
 | `PLAN_MODEL` | *(auto)* | pin a Copilot model for planning |
-| `EXECUTE_MODEL` | *(auto)* | pin a Copilot model for execution |
 | `COPILOT_REVIEW` | `true` | when `true`, automatically request `copilot-pull-request-reviewer[bot]` on newly discovered draft PRs (best-effort) |
 | `COPILOT_SESSION_STORE` | `~/.copilot/session-store.db` | CLI usage store for cost capture |
 | `USD_PER_AIU` | `0` | USD per AI Unit for a dollar figure (0 = report AIU/tokens only) |
