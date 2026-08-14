@@ -39,6 +39,11 @@ export function getLatestPlanIdForIssue(issueNumber: number, repo: RepoRef): num
   return row?.id ?? null;
 }
 
+export function deletePlan(planId: number): boolean {
+  const info = db.prepare(`DELETE FROM plans WHERE id=?`).run(planId);
+  return info.changes > 0;
+}
+
 /** Sum best-effort estimated USD (model-aware) across every job, per issue. */
 function estimatedUsdByIssue(repo: RepoRef): Map<number, number> {
   const rows = db
@@ -320,9 +325,19 @@ export function getPlanView(planId: number) {
   const aiu = totalNanoAiu / 1e9;
 
   const pr = db
-    .prepare(`SELECT pr_number, url, branch, agent_state, screenshot_url FROM prs WHERE plan_id=? ORDER BY id DESC LIMIT 1`)
+    .prepare(
+      `SELECT pr_number, url, branch, agent_state, review_state, screenshot_url
+       FROM prs WHERE plan_id=? ORDER BY id DESC LIMIT 1`,
+    )
     .get(planId) as
-    | { pr_number: number | null; url: string | null; branch: string | null; agent_state: string | null; screenshot_url: string | null }
+    | {
+        pr_number: number | null;
+        url: string | null;
+        branch: string | null;
+        agent_state: string | null;
+        review_state: string | null;
+        screenshot_url: string | null;
+      }
     | undefined;
 
   return {
@@ -336,6 +351,7 @@ export function getPlanView(planId: number) {
           url: pr.url,
           branch: pr.branch,
           agentState: pr.agent_state,
+          reviewState: pr.review_state ?? null,
           screenshotUrl: pr.screenshot_url,
         }
       : null,

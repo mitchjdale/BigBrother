@@ -204,8 +204,37 @@ export default function DashboardPage() {
     }
   };
 
+  const clearPlan = async (issue: Issue) => {
+    if (!selectedRepo) return;
+    const ref = plans[issue.number];
+    if (!ref) return;
+    if (pollers.current[issue.number]) {
+      window.clearInterval(pollers.current[issue.number]);
+      delete pollers.current[issue.number];
+    }
+    try {
+      await api.deletePlan(ref.planId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setPlans((prev) => {
+      const next = { ...prev };
+      delete next[issue.number];
+      writeCache(`bb.cache.plans:${selectedRepo.owner}/${selectedRepo.name}`, next);
+      return next;
+    });
+    if (selected === issue.number) setSelected(null);
+  };
+
   const selectedPlanId = selected != null ? plans[selected]?.planId : undefined;
   const selectedIssue = selected != null ? issues.find((i) => i.number === selected) ?? null : null;
+  const visibleIssues = issues;
+
+  useEffect(() => {
+    if (!selectedRepo) return;
+    writeCache(`bb.cache.plans:${selectedRepo.owner}/${selectedRepo.name}`, plans);
+  }, [plans, selectedRepo]);
 
   // Reflect the current repo / selected issue in the browser tab title (issue #6).
   useEffect(() => {
@@ -313,7 +342,7 @@ export default function DashboardPage() {
               </div>
             ) : error ? (
               <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
-            ) : issues.length === 0 ? (
+            ) : visibleIssues.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground">
                 {loadingRepos
                   ? "Loading repositories…"
@@ -322,7 +351,7 @@ export default function DashboardPage() {
                     : `No closed issues you've worked on for ${selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "the selected repository"}.`}
               </div>
             ) : (
-              issues.map((issue) => (
+              visibleIssues.map((issue) => (
                 <IssueCard
                   key={issue.number}
                   issue={issue}
@@ -330,7 +359,9 @@ export default function DashboardPage() {
                   estimatedUsd={plans[issue.number]?.estimatedUsd}
                   selected={selected === issue.number}
                   busy={!!creating[issue.number]}
+                  hasPlan={!!plans[issue.number]}
                   onCreatePlan={() => createPlan(issue)}
+                  onClearPlan={() => clearPlan(issue)}
                   onSelect={() => setSelected(issue.number)}
                 />
               ))
@@ -349,6 +380,18 @@ export default function DashboardPage() {
                     planId={selectedPlanId}
                     planningModel={planningModel}
                     executionModel={executionModel}
+                    onStatusChange={(status) => {
+                      if (selected == null || selectedPlanId == null) return;
+                      setPlans((prev) => ({
+                        ...prev,
+                        [selected]: {
+                          ...prev[selected],
+                          planId: selectedPlanId,
+                          status,
+                        },
+                      }));
+                      if (status === "pr_open") void loadIssues();
+                    }}
                   />
                 </div>
               ) : (
