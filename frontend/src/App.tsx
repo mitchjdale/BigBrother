@@ -3,6 +3,7 @@ import { api, type Issue, type PlanStatus, type RepoRef } from "@/api/client";
 import { IssueCard } from "@/components/IssueCard";
 import { PlanPanel } from "@/components/PlanPanel";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Eye, Loader2, RefreshCw } from "lucide-react";
 
 interface PlanRef {
@@ -161,6 +162,15 @@ export default function App() {
 
   const selectedPlanId = selected != null ? plans[selected]?.planId : undefined;
 
+  // Reflect the current repo / selected issue in the browser tab title (issue #6).
+  useEffect(() => {
+    const repoLabel = selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : null;
+    const issueTitle =
+      selected != null ? issues.find((i) => i.number === selected)?.title : undefined;
+    const parts = [issueTitle, repoLabel, "BigBrother"].filter(Boolean);
+    document.title = parts.join(" · ");
+  }, [selectedRepo, selected, issues]);
+
   return (
     <div className="mx-auto flex h-screen max-w-[1400px] flex-col">
       <header className="flex items-center justify-between border-b px-6 py-4">
@@ -230,6 +240,7 @@ export default function App() {
           <Button variant="outline" size="sm" onClick={loadIssues}>
             <RefreshCw className="h-4 w-4" /> Refresh issues
           </Button>
+          <ThemeToggle />
         </div>
       </header>
 
