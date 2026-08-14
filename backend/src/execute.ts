@@ -76,7 +76,6 @@ async function maybeRequestReview(
 export function scheduleExecuteJob(
   planId: number,
   planMarkdown: string,
-  opts: { model?: string | null } = {},
 ): void {
   const plan = db
     .prepare(`SELECT repo_owner, repo_name, repo_base FROM plans WHERE id=?`)
@@ -99,7 +98,7 @@ export function scheduleExecuteJob(
 
   void executeQueue.add(async () => {
     db.prepare(`UPDATE jobs SET status='running', updated_at=datetime('now') WHERE id=?`).run(jobId);
-    jobLog.info({ model: opts.model ?? config.executeModel ?? "auto" }, "execute job started");
+    jobLog.info("execute job started");
     const planFile = path.join(os.tmpdir(), `bb-plan-${planId}-${Date.now()}.md`);
     try {
       fs.writeFileSync(
@@ -117,8 +116,9 @@ export function scheduleExecuteJob(
         "--base",
         plan.repo_base || config.repo.base,
       ];
-      const selectedModel = opts.model === undefined ? config.executeModel : opts.model;
-      if (selectedModel) args.push("--model", selectedModel);
+      // NOTE: `gh agent-task create` has no --model flag — the Copilot cloud
+      // coding agent selects its own model, so implementation model choice is
+      // not supported here.
 
       const { stdout, stderr } = await run("gh", args, { env: ghEnv(), maxBuffer: 32 * 1024 * 1024 });
 

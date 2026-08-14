@@ -398,8 +398,6 @@ app.patch("/plans/:id/version", (req, res) => {
 // --- M4: approve → execute → draft PR via the Copilot cloud agent ---
 app.post("/plans/:id/execute", (req, res) => {
   const planId = Number(req.params.id);
-  const parsedModel = parseModel(req.body);
-  if (parsedModel.error) return res.status(400).json({ error: parsedModel.error });
   const plan = db.prepare(`SELECT status FROM plans WHERE id=?`).get(planId) as
     | { status: string }
     | undefined;
@@ -410,7 +408,7 @@ app.post("/plans/:id/execute", (req, res) => {
   const markdown = getCurrentPlanMarkdown(planId);
   if (!markdown) return res.status(409).json({ error: "no plan version to execute" });
 
-  scheduleExecuteJob(planId, markdown, { model: parsedModel.model });
+  scheduleExecuteJob(planId, markdown);
   res.status(202).json({ planId, status: "executing" });
 });
 
