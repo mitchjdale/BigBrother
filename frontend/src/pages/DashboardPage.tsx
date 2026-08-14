@@ -201,6 +201,29 @@ export default function DashboardPage() {
     }
   };
 
+  const clearPlan = async (issue: Issue) => {
+    if (!selectedRepo) return;
+    const ref = plans[issue.number];
+    if (!ref) return;
+    if (pollers.current[issue.number]) {
+      window.clearInterval(pollers.current[issue.number]);
+      delete pollers.current[issue.number];
+    }
+    try {
+      await api.deletePlan(ref.planId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setPlans((prev) => {
+      const next = { ...prev };
+      delete next[issue.number];
+      writeCache(`bb.cache.plans:${selectedRepo.owner}/${selectedRepo.name}`, next);
+      return next;
+    });
+    if (selected === issue.number) setSelected(null);
+  };
+
   const selectedPlanId = selected != null ? plans[selected]?.planId : undefined;
   const selectedIssue = selected != null ? issues.find((i) => i.number === selected) ?? null : null;
   const openIssues = issues.filter((issue) => issue.state !== "closed");
@@ -343,7 +366,9 @@ export default function DashboardPage() {
                   estimatedUsd={plans[issue.number]?.estimatedUsd}
                   selected={selected === issue.number}
                   busy={!!creating[issue.number]}
+                  hasPlan={!!plans[issue.number]}
                   onCreatePlan={() => createPlan(issue)}
+                  onClearPlan={() => clearPlan(issue)}
                   onSelect={() => setSelected(issue.number)}
                 />
               ))
