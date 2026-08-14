@@ -12,6 +12,7 @@ import {
   listLatestPlansByIssue,
 } from "./planner.js";
 import { scheduleExecuteJob, refreshExecution } from "./execute.js";
+import { getUsageReport, type Granularity } from "./reports.js";
 import type { RepoRef } from "./types.js";
 
 const app = express();
@@ -89,6 +90,34 @@ app.get("/repos/issues", async (req, res) => {
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }
+});
+
+// --- Issue #1: aggregated token/AIU usage across plans (global, optional repo filter) ---
+app.get("/usage", (req, res) => {
+  const query = req.query as Record<string, unknown>;
+  const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+
+  const repoOwner = str(query.repoOwner);
+  const repoName = str(query.repoName);
+  if ((repoOwner && !repoName) || (!repoOwner && repoName)) {
+    return res.status(400).json({ error: "repoOwner and repoName must be provided together" });
+  }
+  if (repoOwner && !validRepoPart(repoOwner)) {
+    return res.status(400).json({ error: "repoOwner is invalid" });
+  }
+  if (repoName && !validRepoPart(repoName)) {
+    return res.status(400).json({ error: "repoName is invalid" });
+  }
+
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const from = str(query.from);
+  const to = str(query.to);
+  if (from && !dateRe.test(from)) return res.status(400).json({ error: "from must be YYYY-MM-DD" });
+  if (to && !dateRe.test(to)) return res.status(400).json({ error: "to must be YYYY-MM-DD" });
+
+  const granularity: Granularity = query.granularity === "week" ? "week" : "day";
+
+  res.json(getUsageReport({ repoOwner, repoName, from, to, granularity }));
 });
 
 // --- Hydration: latest plan per issue, so the UI can restore state after a reload ---
