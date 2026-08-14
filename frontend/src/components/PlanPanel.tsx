@@ -28,17 +28,22 @@ export function PlanPanel({ planId, planningModel, executionModel, onStatusChang
   const lastStatus = useRef<PlanStatus | null>(null);
   const active = useRef(true);
   const pollTimer = useRef<number | undefined>(undefined);
+  // Keep the latest onStatusChange in a ref so applyPlan / the poller don't
+  // change identity when the parent passes a new inline callback each render.
+  // Without this the polling effect re-ran on every render and fired requests
+  // in a tight loop (hundreds per second).
+  const onStatusChangeRef = useRef(onStatusChange);
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+  });
 
-  const applyPlan = useCallback(
-    (next: PlanView) => {
-      setPlan(next);
-      if (lastStatus.current !== next.status) {
-        lastStatus.current = next.status;
-        onStatusChange?.(next.status);
-      }
-    },
-    [onStatusChange],
-  );
+  const applyPlan = useCallback((next: PlanView) => {
+    setPlan(next);
+    if (lastStatus.current !== next.status) {
+      lastStatus.current = next.status;
+      onStatusChangeRef.current?.(next.status);
+    }
+  }, []);
 
   // Single poller: only ever one timer is scheduled (guarded by pollTimer).
   // Callers that resume polling (execute/regenerate/retry) reuse this instead
