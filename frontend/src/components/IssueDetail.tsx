@@ -10,12 +10,14 @@ interface Props {
 
 export function IssueDetail({ issue }: Props) {
   const body = issue.body?.trim();
+  const ref = issue.source === "github" ? `#${issue.number}` : issue.key;
+  const linkLabel = issue.source === "github" ? "View on GitHub" : "View in Jira";
   return (
     <Card className="shrink-0">
       <CardHeader className="space-y-2 pb-3">
         <div className="flex items-start justify-between gap-3">
           <CardTitle className="text-base leading-snug">
-            <span className="text-muted-foreground">#{issue.number}</span> {issue.title}
+            <span className="text-muted-foreground">{ref}</span> {issue.title}
           </CardTitle>
           <a
             href={issue.url}
@@ -23,14 +25,19 @@ export function IssueDetail({ issue }: Props) {
             rel="noreferrer"
             className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-primary hover:underline"
           >
-            <ExternalLink className="h-3.5 w-3.5" /> View on GitHub
+            <ExternalLink className="h-3.5 w-3.5" /> {linkLabel}
           </a>
         </div>
-        {(issue.labels.length > 0 || issue.state) && (
+        {(issue.labels.length > 0 || issue.status || issue.issueType) && (
           <div className="flex flex-wrap items-center gap-1">
-            {issue.state && (
+            {issue.issueType && (
+              <Badge variant="secondary" className="text-[10px]">
+                {issue.issueType}
+              </Badge>
+            )}
+            {issue.status && (
               <Badge variant="secondary" className="text-[10px] capitalize">
-                {issue.state}
+                {issue.status}
               </Badge>
             )}
             {issue.labels.map((l) => (

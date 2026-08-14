@@ -1,9 +1,12 @@
 import express from "express";
 import { pinoHttp } from "pino-http";
-import { config } from "./config.js";
+import { config, jiraConfigured } from "./config.js";
 import { db } from "./db.js";
 import { logger, log } from "./logger.js";
-import { getIssue, listIssues, listSelectableRepos } from "./github.js";
+import { listIssues, listSelectableRepos } from "./github.js";
+import { listIssues as listJiraIssues, listProjects } from "./jira.js";
+import { fetchIssue, repoForIssue } from "./issues.js";
+import { listMappings, upsertMapping, deleteMapping } from "./mapping.js";
 import {
   createPlanRecord,
   schedulePlanJob,
@@ -15,7 +18,7 @@ import {
 } from "./planner.js";
 import { scheduleExecuteJob, refreshExecution } from "./execute.js";
 import { getUsageReport, type Granularity } from "./reports.js";
-import type { RepoRef } from "./types.js";
+import type { IssueSource, RepoRef } from "./types.js";
 
 const httpLog = log("http");
 const app = express();
@@ -96,6 +99,37 @@ function queryToRecord(query: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+function parseSource(v: unknown): IssueSource {
+  return v === "jira" ? "jira" : "github";
+}
+
+/**
+ * Resolve the effective repo (clone + PR target) and optional JIRA project for
+ * a request. GitHub uses the selected repo directly; JIRA resolves the repo
+ * from the project→repo mapping.
+ */
+function resolveContext(
+  source: IssueSource,
+  data: Record<string, unknown> | undefined,
+): { repo: RepoRef; projectKey: string | null; error: string | null } {
+  if (source === "jira") {
+    const projectKey = typeof data?.project === "string" ? data.project.trim() : "";
+    if (!projectKey) return { repo: { ...config.repo }, projectKey: null, error: "project is required for JIRA" };
+    try {
+      const repo = repoForIssue("jira", projectKey, config.repo);
+      return { repo, projectKey, error: null };
+    } catch (err) {
+      return {
+        repo: { ...config.repo },
+        projectKey,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+  const parsed = parseRepo(data);
+  return { repo: parsed.repo, projectKey: null, error: parsed.error };
+}
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -113,9 +147,63 @@ app.get("/repos", async (_req, res) => {
   }
 });
 
-// --- M1: list issues for the selected repo ---
+// --- Issue sources available to the UI (GitHub always; JIRA if configured) ---
+app.get("/sources", (_req, res) => {
+  res.json({ github: true, jira: jiraConfigured() });
+});
+
+// --- JIRA projects (for the Settings mapping form) ---
+app.get("/jira/projects", async (_req, res) => {
+  if (!jiraConfigured()) return res.status(400).json({ error: "JIRA is not configured" });
+  try {
+    res.json(await listProjects());
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// --- JIRA project → GitHub repo mappings (managed on the Settings page) ---
+app.get("/mappings", (_req, res) => {
+  res.json(listMappings());
+});
+
+app.post("/mappings", (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const projectKey = typeof body.projectKey === "string" ? body.projectKey.trim() : "";
+  const projectName = typeof body.projectName === "string" ? body.projectName.trim() : "";
+  if (!projectKey) return res.status(400).json({ error: "projectKey is required" });
+  const parsedRepo = parseRepo(body);
+  if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
+  const mapping = upsertMapping({
+    projectKey,
+    projectName: projectName || projectKey,
+    repo: parsedRepo.repo,
+  });
+  res.status(201).json(mapping);
+});
+
+app.delete("/mappings/:id", (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "invalid mapping id" });
+  const removed = deleteMapping(id);
+  if (!removed) return res.status(404).json({ error: "mapping not found" });
+  res.status(204).end();
+});
+
+// --- M1: list issues for the selected source (GitHub repo or JIRA project) ---
 app.get("/repos/issues", async (req, res) => {
-  const parsedRepo = parseRepo(queryToRecord(req.query as Record<string, unknown>));
+  const query = req.query as Record<string, unknown>;
+  const source = parseSource(query.source);
+  if (source === "jira") {
+    const projectKey = typeof query.project === "string" ? query.project.trim() : "";
+    if (!projectKey) return res.status(400).json({ error: "project is required for JIRA" });
+    try {
+      return res.json(await listJiraIssues(projectKey));
+    } catch (err) {
+      return res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  const parsedRepo = parseRepo(queryToRecord(query));
   if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
   try {
     res.json(await listIssues(parsedRepo.repo));
@@ -154,18 +242,26 @@ app.get("/usage", (req, res) => {
 
 // --- Hydration: latest plan per issue, so the UI can restore state after a reload ---
 app.get("/plans", (req, res) => {
-  const parsedRepo = parseRepo(queryToRecord(req.query as Record<string, unknown>));
-  if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
-  res.json(listLatestPlansByIssue(parsedRepo.repo));
+  const query = req.query as Record<string, unknown>;
+  const source = parseSource(query.source);
+  const ctx = resolveContext(source, {
+    ...queryToRecord(query),
+    project: query.project,
+  });
+  if (ctx.error) return res.status(400).json({ error: ctx.error });
+  res.json(listLatestPlansByIssue(ctx.repo, source));
 });
 
-// --- Fetch the latest persisted plan for a given issue ---
-app.get("/issues/:number/plan", (req, res) => {
-  const issueNumber = Number(req.params.number);
-  if (!Number.isInteger(issueNumber)) return res.status(400).json({ error: "invalid issue number" });
-  const parsedRepo = parseRepo(queryToRecord(req.query as Record<string, unknown>));
-  if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
-  const planId = getLatestPlanIdForIssue(issueNumber, parsedRepo.repo);
+// --- Fetch the latest persisted plan for a given issue (source + key) ---
+app.get("/issues/:source/:key/plan", (req, res) => {
+  const source = parseSource(req.params.source);
+  const issueKey = String(req.params.key);
+  const ctx = resolveContext(source, {
+    ...queryToRecord(req.query as Record<string, unknown>),
+    project: (req.query as Record<string, unknown>).project,
+  });
+  if (ctx.error) return res.status(400).json({ error: ctx.error });
+  const planId = getLatestPlanIdForIssue(source, issueKey, ctx.repo);
   if (planId == null) return res.status(404).json({ error: "no plan for issue" });
   const view = getPlanView(planId);
   if (!view) return res.status(404).json({ error: "no plan for issue" });
@@ -175,18 +271,18 @@ app.get("/issues/:number/plan", (req, res) => {
 // --- M2: "Create plan" — enqueue a read-only planning job ---
 // Reuses an existing plan record for the issue if one exists, so a re-run
 // accumulates onto the same plan and its prior token usage is retained (#11).
-app.post("/issues/:number/plan", async (req, res) => {
-  const issueNumber = Number(req.params.number);
-  if (!Number.isInteger(issueNumber)) return res.status(400).json({ error: "invalid issue number" });
+app.post("/issues/:source/:key/plan", async (req, res) => {
+  const source = parseSource(req.params.source);
+  const issueKey = String(req.params.key);
   const parsedModel = parseModel(req.body);
   if (parsedModel.error) return res.status(400).json({ error: parsedModel.error });
-  const parsedRepo = parseRepo((req.body ?? {}) as Record<string, unknown>);
-  if (parsedRepo.error) return res.status(400).json({ error: parsedRepo.error });
+  const ctx = resolveContext(source, (req.body ?? {}) as Record<string, unknown>);
+  if (ctx.error) return res.status(400).json({ error: ctx.error });
 
   try {
-    const issue = await getIssue(issueNumber, parsedRepo.repo);
+    const issue = await fetchIssue(source, issueKey, ctx.repo);
 
-    const existingId = getLatestPlanIdForIssue(issue.number, parsedRepo.repo);
+    const existingId = getLatestPlanIdForIssue(source, issue.key, ctx.repo);
     if (existingId != null) {
       const existing = db.prepare(`SELECT status FROM plans WHERE id=?`).get(existingId) as
         | { status: string }
@@ -199,7 +295,7 @@ app.post("/issues/:number/plan", async (req, res) => {
       return res.status(202).json({ planId: existingId, status: "planning" });
     }
 
-    const planId = createPlanRecord(issue.number, issue.title, parsedRepo.repo);
+    const planId = createPlanRecord(issue, ctx.repo);
     schedulePlanJob(planId, { model: parsedModel.model });
     res.status(202).json({ planId, status: "planning" });
   } catch (err) {

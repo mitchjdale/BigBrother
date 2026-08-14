@@ -125,7 +125,9 @@ export function PlanPanel({ planId, planningModel, executionModel }: Props) {
     <div className="flex h-full flex-col gap-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">Issue #{plan.issueNumber}</h2>
+          <h2 className="text-lg font-semibold">
+            {plan.source === "github" ? `Issue #${plan.issueNumber}` : plan.issueKey}
+          </h2>
           <StatusBadge status={plan.status} />
         </div>
         <Button variant="ghost" size="icon" onClick={refresh} title="Refresh">

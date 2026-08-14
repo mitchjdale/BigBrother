@@ -1,16 +1,41 @@
+export type IssueSource = "github" | "jira";
+
 export interface Issue {
-  number: number;
+  source: IssueSource;
+  key: string;
+  number: number | null;
   title: string;
   body: string | null;
   state: string;
   url: string;
   labels: string[];
+  issueType?: string | null;
+  status?: string | null;
 }
 
 export interface RepoRef {
   owner: string;
   name: string;
   base: string;
+}
+
+export interface JiraProject {
+  key: string;
+  name: string;
+}
+
+export interface JiraProjectMapping {
+  id: number;
+  projectKey: string;
+  projectName: string;
+  repoOwner: string;
+  repoName: string;
+  repoBase: string;
+}
+
+export interface Sources {
+  github: boolean;
+  jira: boolean;
 }
 
 export interface Cost {
@@ -35,7 +60,9 @@ export interface PlanVersionMeta {
 export type PlanStatus = "idle" | "planning" | "ready" | "executing" | "pr_open" | "failed";
 export interface PlanView {
   id: number;
-  issueNumber: number;
+  issueNumber: number | null;
+  issueKey: string;
+  source: IssueSource;
   status: PlanStatus;
   error: string | null;
   pr: {
@@ -129,14 +156,35 @@ export interface UsageParams {
   granularity?: UsageGranularity;
 }
 
+/** What the backend needs to resolve issues + the clone/PR repo per source. */
+export type IssueContext =
+  | { source: "github"; repo: RepoRef }
+  | { source: "jira"; project: string };
+
 const BASE = "/api";
-function repoQuery(repo: RepoRef): string {
-  const params = new URLSearchParams({
-    repoOwner: repo.owner,
-    repoName: repo.name,
-    repoBase: repo.base,
-  });
+
+function contextQuery(ctx: IssueContext): string {
+  const params = new URLSearchParams({ source: ctx.source });
+  if (ctx.source === "github") {
+    params.set("repoOwner", ctx.repo.owner);
+    params.set("repoName", ctx.repo.name);
+    params.set("repoBase", ctx.repo.base);
+  } else {
+    params.set("project", ctx.project);
+  }
   return `?${params.toString()}`;
+}
+
+function contextBody(ctx: IssueContext): Record<string, string> {
+  if (ctx.source === "github") {
+    return {
+      source: "github",
+      repoOwner: ctx.repo.owner,
+      repoName: ctx.repo.name,
+      repoBase: ctx.repo.base,
+    };
+  }
+  return { source: "jira", project: ctx.project };
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -151,32 +199,52 @@ export const api = {
   listRepos: () =>
     fetch(`${BASE}/repos`).then(json<{ defaultRepo: RepoRef; repos: RepoRef[] }>),
 
-  listIssues: (repo: RepoRef) => fetch(`${BASE}/repos/issues${repoQuery(repo)}`).then(json<Issue[]>),
+  listSources: () => fetch(`${BASE}/sources`).then(json<Sources>),
 
-  listPlans: (repo: RepoRef) =>
-    fetch(`${BASE}/plans${repoQuery(repo)}`).then(
-      json<{ issueNumber: number; planId: number; status: PlanStatus }[]>,
-    ),
+  listJiraProjects: () => fetch(`${BASE}/jira/projects`).then(json<JiraProject[]>),
 
-  getIssuePlan: (issueNumber: number, repo: RepoRef) =>
-    fetch(`${BASE}/issues/${issueNumber}/plan${repoQuery(repo)}`).then(async (r) => {
-      if (r.status === 404) return null;
-      return json<PlanView>(r);
-    }),
+  listMappings: () => fetch(`${BASE}/mappings`).then(json<JiraProjectMapping[]>),
 
-  createPlan: (issueNumber: number, repo: RepoRef, model: string | null = null) =>
-    fetch(`${BASE}/issues/${issueNumber}/plan`, {
+  createMapping: (input: { projectKey: string; projectName: string; repo: RepoRef }) =>
+    fetch(`${BASE}/mappings`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model,
-        repoOwner: repo.owner,
-        repoName: repo.name,
-        repoBase: repo.base,
+        projectKey: input.projectKey,
+        projectName: input.projectName,
+        repoOwner: input.repo.owner,
+        repoName: input.repo.name,
+        repoBase: input.repo.base,
       }),
-    }).then(
-      json<{ planId: number; status: PlanStatus }>,
+    }).then(json<JiraProjectMapping>),
+
+  deleteMapping: (id: number) =>
+    fetch(`${BASE}/mappings/${id}`, { method: "DELETE" }).then((r) => {
+      if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
+    }),
+
+  listIssues: (ctx: IssueContext) =>
+    fetch(`${BASE}/repos/issues${contextQuery(ctx)}`).then(json<Issue[]>),
+
+  listPlans: (ctx: IssueContext) =>
+    fetch(`${BASE}/plans${contextQuery(ctx)}`).then(
+      json<{ issueKey: string; issueNumber: number | null; source: IssueSource; planId: number; status: PlanStatus }[]>,
     ),
+
+  getIssuePlan: (ctx: IssueContext, issueKey: string) =>
+    fetch(`${BASE}/issues/${ctx.source}/${encodeURIComponent(issueKey)}/plan${contextQuery(ctx)}`).then(
+      async (r) => {
+        if (r.status === 404) return null;
+        return json<PlanView>(r);
+      },
+    ),
+
+  createPlan: (ctx: IssueContext, issueKey: string, model: string | null = null) =>
+    fetch(`${BASE}/issues/${ctx.source}/${encodeURIComponent(issueKey)}/plan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model, ...contextBody(ctx) }),
+    }).then(json<{ planId: number; status: PlanStatus }>),
 
   getPlan: (planId: number) => fetch(`${BASE}/plans/${planId}`).then(json<PlanView>),
 

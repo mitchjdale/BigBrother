@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Issue, type PlanStatus, type RepoRef } from "@/api/client";
+import {
+  api,
+  type Issue,
+  type IssueContext,
+  type IssueSource,
+  type JiraProjectMapping,
+  type PlanStatus,
+  type RepoRef,
+} from "@/api/client";
 import { IssueCard } from "@/components/IssueCard";
 import { IssueDetail } from "@/components/IssueDetail";
 import { PlanPanel } from "@/components/PlanPanel";
@@ -24,7 +32,17 @@ const MODEL_OPTIONS = [
   { label: "Gemini 3.1 Pro Preview", value: "gemini-3.1-pro-preview" },
 ];
 
+const selectClass = "h-9 rounded-md border bg-background px-2 text-sm text-foreground";
+
+/** Stable per-context cache/label key. */
+function contextKey(ctx: IssueContext): string {
+  return ctx.source === "github" ? `gh:${ctx.repo.owner}/${ctx.repo.name}` : `jira:${ctx.project}`;
+}
+
 export default function DashboardPage() {
+  const [source, setSource] = usePersistentState<IssueSource>("bb.dashboard.source", "github");
+  const [jiraAvailable, setJiraAvailable] = useState(false);
+
   const [repoOptions, setRepoOptions] = useState<RepoRef[]>(
     () => readCache<{ defaultRepo: RepoRef; repos: RepoRef[] }>("bb.cache.repos")?.repos ?? [],
   );
@@ -33,12 +51,18 @@ export default function DashboardPage() {
   const [loadingRepos, setLoadingRepos] = useState(
     () => readCache<{ repos: RepoRef[] }>("bb.cache.repos") == null,
   );
+
+  const [mappings, setMappings] = useState<JiraProjectMapping[]>(
+    () => readCache<JiraProjectMapping[]>("bb.cache.mappings") ?? [],
+  );
+  const [selectedProject, setSelectedProject] = usePersistentState("bb.dashboard.project", "");
+
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [plans, setPlans] = useState<Record<number, PlanRef>>({});
-  const [creating, setCreating] = useState<Record<number, boolean>>({});
-  const [selected, setSelected] = useState<number | null>(null);
+  const [plans, setPlans] = useState<Record<string, PlanRef>>({});
+  const [creating, setCreating] = useState<Record<string, boolean>>({});
+  const [selected, setSelected] = useState<string | null>(null);
   const [planningModel, setPlanningModel] = usePersistentState<string | null>(
     "bb.dashboard.planningModel",
     null,
@@ -47,11 +71,24 @@ export default function DashboardPage() {
     "bb.dashboard.executionModel",
     null,
   );
-  const pollers = useRef<Record<number, number>>({});
+  const pollers = useRef<Record<string, number>>({});
+
   const ownerOptions = [...new Set(repoOptions.map((r) => r.owner))];
   const reposForOwner = repoOptions.filter((r) => r.owner === selectedOwner);
   const selectedRepo =
     repoOptions.find((r) => r.owner === selectedOwner && r.name === selectedRepoName) ?? null;
+  const selectedMapping = mappings.find((m) => m.projectKey === selectedProject) ?? null;
+
+  // The effective issue-source context used for all API calls.
+  const ctx: IssueContext | null =
+    source === "github"
+      ? selectedRepo
+        ? { source: "github", repo: selectedRepo }
+        : null
+      : selectedProject
+        ? { source: "jira", project: selectedProject }
+        : null;
+  const ctxId = ctx ? contextKey(ctx) : null;
 
   const clearPollers = useCallback(() => {
     const current = pollers.current;
@@ -60,22 +97,21 @@ export default function DashboardPage() {
   }, []);
 
   const loadIssues = useCallback(async () => {
-    if (!selectedRepo) {
+    if (!ctx || !ctxId) {
       setIssues([]);
       setLoading(false);
       return;
     }
-    const cacheKey = `bb.cache.issues:${selectedRepo.owner}/${selectedRepo.name}`;
+    const cacheKey = `bb.cache.issues:${ctxId}`;
     const cached = readCache<Issue[]>(cacheKey);
     if (cached) {
-      // Show cached issues immediately and revalidate in the background.
       setIssues(cached);
       setLoading(false);
     } else {
       setLoading(true);
     }
     try {
-      const fresh = await api.listIssues(selectedRepo);
+      const fresh = await api.listIssues(ctx);
       setIssues(fresh);
       writeCache(cacheKey, fresh);
       setError(null);
@@ -84,21 +120,22 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedRepo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctxId]);
 
   useEffect(() => {
     return () => clearPollers();
   }, [clearPollers]);
 
-  const trackPlan = useCallback((issueNumber: number, planId: number) => {
-    if (pollers.current[issueNumber]) window.clearInterval(pollers.current[issueNumber]);
-    pollers.current[issueNumber] = window.setInterval(async () => {
+  const trackPlan = useCallback((issueKey: string, planId: number) => {
+    if (pollers.current[issueKey]) window.clearInterval(pollers.current[issueKey]);
+    pollers.current[issueKey] = window.setInterval(async () => {
       try {
         const p = await api.getPlan(planId);
-        setPlans((prev) => ({ ...prev, [issueNumber]: { planId, status: p.status } }));
+        setPlans((prev) => ({ ...prev, [issueKey]: { planId, status: p.status } }));
         if (p.status !== "planning" && p.status !== "executing") {
-          window.clearInterval(pollers.current[issueNumber]);
-          delete pollers.current[issueNumber];
+          window.clearInterval(pollers.current[issueKey]);
+          delete pollers.current[issueKey];
         }
       } catch {
         /* keep polling */
@@ -106,21 +143,28 @@ export default function DashboardPage() {
     }, 2500);
   }, []);
 
-  // Restore persisted plans after a page/server restart so previously planned
-  // issues still show their plan (issue #7).
+  // One-time load: sources, repos, and JIRA mappings.
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const payload = await api.listRepos();
+        const [sources, payload] = await Promise.all([
+          api.listSources().catch(() => ({ github: true, jira: false })),
+          api.listRepos(),
+        ]);
         if (!active) return;
+        setJiraAvailable(sources.jira);
         setRepoOptions(payload.repos);
         writeCache("bb.cache.repos", payload);
-        // Keep a persisted selection if it's still valid; otherwise fall back
-        // to the backend default repo.
         if (!payload.repos.some((r) => r.owner === selectedOwner)) {
           setSelectedOwner(payload.defaultRepo.owner);
           setSelectedRepoName(payload.defaultRepo.name);
+        }
+        if (sources.jira) {
+          const maps = await api.listMappings().catch(() => [] as JiraProjectMapping[]);
+          if (!active) return;
+          setMappings(maps);
+          writeCache("bb.cache.mappings", maps);
         }
       } catch (e) {
         if (!active) return;
@@ -132,45 +176,55 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-    // Runs once on mount; intentionally captures the initial persisted
-    // selection to decide whether to apply the backend default.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fall back to GitHub if a persisted JIRA source is no longer available.
+  useEffect(() => {
+    if (source === "jira" && !jiraAvailable && !loadingRepos) setSource("github");
+  }, [source, jiraAvailable, loadingRepos, setSource]);
+
+  // Keep the GitHub repo selection valid for the chosen owner.
   useEffect(() => {
     if (!selectedOwner) return;
-    // Wait until repos have loaded before "correcting" the selection, otherwise
-    // we'd wipe the persisted repo name while the list is momentarily empty.
     if (reposForOwner.length === 0) return;
     if (reposForOwner.some((r) => r.name === selectedRepoName)) return;
     setSelectedRepoName(reposForOwner[0]?.name ?? "");
   }, [reposForOwner, selectedOwner, selectedRepoName, setSelectedRepoName]);
 
+  // Default the JIRA project selection to the first mapping.
+  useEffect(() => {
+    if (source !== "jira") return;
+    if (mappings.length === 0) return;
+    if (mappings.some((m) => m.projectKey === selectedProject)) return;
+    setSelectedProject(mappings[0]?.projectKey ?? "");
+  }, [source, mappings, selectedProject, setSelectedProject]);
+
+  // Reset the view whenever the effective context changes.
   useEffect(() => {
     clearPollers();
-    const plansKey = selectedRepo
-      ? `bb.cache.plans:${selectedRepo.owner}/${selectedRepo.name}`
-      : null;
-    // Seed plan badges from cache so they show instantly on refresh.
-    setPlans(plansKey ? readCache<Record<number, PlanRef>>(plansKey) ?? {} : {});
+    const plansKey = ctxId ? `bb.cache.plans:${ctxId}` : null;
+    setPlans(plansKey ? readCache<Record<string, PlanRef>>(plansKey) ?? {} : {});
     setCreating({});
     setSelected(null);
     loadIssues();
-  }, [clearPollers, loadIssues, selectedRepo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearPollers, loadIssues, ctxId]);
 
+  // Hydrate persisted plans for the current context.
   useEffect(() => {
-    if (!selectedRepo) return;
+    if (!ctx || !ctxId) return;
     let active = true;
     (async () => {
       try {
-        const existing = await api.listPlans(selectedRepo);
+        const existing = await api.listPlans(ctx);
         if (!active) return;
-        const map: Record<number, PlanRef> = {};
+        const map: Record<string, PlanRef> = {};
         for (const p of existing) {
-          map[p.issueNumber] = { planId: p.planId, status: p.status };
-          if (p.status === "planning" || p.status === "executing") trackPlan(p.issueNumber, p.planId);
+          map[p.issueKey] = { planId: p.planId, status: p.status };
+          if (p.status === "planning" || p.status === "executing") trackPlan(p.issueKey, p.planId);
         }
-        writeCache(`bb.cache.plans:${selectedRepo.owner}/${selectedRepo.name}`, map);
+        writeCache(`bb.cache.plans:${ctxId}`, map);
         setPlans((prev) => ({ ...map, ...prev }));
       } catch {
         /* no persisted plans / backend unavailable — ignore */
@@ -179,34 +233,41 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [selectedRepo, trackPlan]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctxId, trackPlan]);
 
   const createPlan = async (issue: Issue) => {
-    if (!selectedRepo) return;
-    setCreating((c) => ({ ...c, [issue.number]: true }));
+    if (!ctx) return;
+    setCreating((c) => ({ ...c, [issue.key]: true }));
     try {
-      const { planId, status } = await api.createPlan(issue.number, selectedRepo, planningModel);
-      setPlans((prev) => ({ ...prev, [issue.number]: { planId, status } }));
-      setSelected(issue.number);
-      trackPlan(issue.number, planId);
+      const { planId, status } = await api.createPlan(ctx, issue.key, planningModel);
+      setPlans((prev) => ({ ...prev, [issue.key]: { planId, status } }));
+      setSelected(issue.key);
+      trackPlan(issue.key, planId);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setCreating((c) => ({ ...c, [issue.number]: false }));
+      setCreating((c) => ({ ...c, [issue.key]: false }));
     }
   };
 
   const selectedPlanId = selected != null ? plans[selected]?.planId : undefined;
-  const selectedIssue = selected != null ? issues.find((i) => i.number === selected) ?? null : null;
+  const selectedIssue = selected != null ? issues.find((i) => i.key === selected) ?? null : null;
 
-  // Reflect the current repo / selected issue in the browser tab title (issue #6).
+  const contextLabel =
+    source === "github"
+      ? selectedRepo
+        ? `${selectedRepo.owner}/${selectedRepo.name}`
+        : null
+      : selectedMapping
+        ? `${selectedMapping.projectKey}`
+        : null;
+
   useEffect(() => {
-    const repoLabel = selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : null;
-    const issueTitle =
-      selected != null ? issues.find((i) => i.number === selected)?.title : undefined;
-    const parts = [issueTitle, repoLabel, "BigBrother"].filter(Boolean);
+    const issueTitle = selectedIssue?.title;
+    const parts = [issueTitle, contextLabel, "BigBrother"].filter(Boolean);
     document.title = parts.join(" · ");
-  }, [selectedRepo, selected, issues]);
+  }, [contextLabel, selectedIssue]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -219,39 +280,75 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-end gap-3">
           <label className="grid gap-1 text-xs text-muted-foreground">
-            Owner
+            Source
             <select
-              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
-              value={selectedOwner}
-              onChange={(e) => setSelectedOwner(e.target.value)}
-              disabled={loadingRepos || ownerOptions.length === 0}
+              className={selectClass}
+              value={source}
+              onChange={(e) => setSource(e.target.value as IssueSource)}
             >
-              {ownerOptions.map((owner) => (
-                <option key={owner} value={owner}>
-                  {owner}
-                </option>
-              ))}
+              <option value="github">GitHub Issues</option>
+              <option value="jira" disabled={!jiraAvailable}>
+                JIRA{jiraAvailable ? "" : " (not configured)"}
+              </option>
             </select>
           </label>
-          <label className="grid gap-1 text-xs text-muted-foreground">
-            Repository
-            <select
-              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
-              value={selectedRepoName}
-              onChange={(e) => setSelectedRepoName(e.target.value)}
-              disabled={loadingRepos || reposForOwner.length === 0}
-            >
-              {reposForOwner.map((repo) => (
-                <option key={`${repo.owner}/${repo.name}`} value={repo.name}>
-                  {repo.name}
-                </option>
-              ))}
-            </select>
-          </label>
+
+          {source === "github" ? (
+            <>
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                Owner
+                <select
+                  className={selectClass}
+                  value={selectedOwner}
+                  onChange={(e) => setSelectedOwner(e.target.value)}
+                  disabled={loadingRepos || ownerOptions.length === 0}
+                >
+                  {ownerOptions.map((owner) => (
+                    <option key={owner} value={owner}>
+                      {owner}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                Repository
+                <select
+                  className={selectClass}
+                  value={selectedRepoName}
+                  onChange={(e) => setSelectedRepoName(e.target.value)}
+                  disabled={loadingRepos || reposForOwner.length === 0}
+                >
+                  {reposForOwner.map((repo) => (
+                    <option key={`${repo.owner}/${repo.name}`} value={repo.name}>
+                      {repo.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ) : (
+            <label className="grid gap-1 text-xs text-muted-foreground">
+              JIRA project
+              <select
+                className={selectClass}
+                value={selectedProject}
+                onChange={(e) => setSelectedProject(e.target.value)}
+                disabled={mappings.length === 0}
+              >
+                {mappings.length === 0 && <option value="">No mappings</option>}
+                {mappings.map((m) => (
+                  <option key={m.projectKey} value={m.projectKey}>
+                    {m.projectKey} — {m.projectName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
           <label className="grid gap-1 text-xs text-muted-foreground">
             Planning model
             <select
-              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
+              className={selectClass}
               value={planningModel ?? ""}
               onChange={(e) => setPlanningModel(e.target.value || null)}
             >
@@ -265,7 +362,7 @@ export default function DashboardPage() {
           <label className="grid gap-1 text-xs text-muted-foreground">
             Execution model
             <select
-              className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
+              className={selectClass}
               value={executionModel ?? ""}
               onChange={(e) => setExecutionModel(e.target.value || null)}
             >
@@ -282,13 +379,28 @@ export default function DashboardPage() {
         </div>
       </header>
 
+      {source === "jira" && selectedMapping && (
+        <div className="border-b bg-muted/30 px-6 py-1.5 text-xs text-muted-foreground">
+          Plans &amp; PRs for <span className="font-medium">{selectedMapping.projectKey}</span> target{" "}
+          <span className="font-mono">
+            {selectedMapping.repoOwner}/{selectedMapping.repoName}
+          </span>{" "}
+          ({selectedMapping.repoBase})
+        </div>
+      )}
+
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(320px,420px)_1fr] overflow-hidden">
         <aside className="flex flex-col overflow-hidden border-r">
           <div className="border-b px-4 py-2 text-sm font-medium text-muted-foreground">
             Open issues {issues.length > 0 && `(${issues.length})`}
           </div>
           <div className="flex-1 space-y-2 overflow-auto p-3">
-            {loading ? (
+            {source === "jira" && mappings.length === 0 && !loadingRepos ? (
+              <div className="p-4 text-sm text-muted-foreground">
+                No JIRA projects are mapped yet. Add a project → repository mapping on the{" "}
+                <span className="font-medium">Settings</span> page.
+              </div>
+            ) : loading ? (
               <div className="flex items-center gap-2 p-4 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading issues…
               </div>
@@ -297,19 +409,19 @@ export default function DashboardPage() {
             ) : issues.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground">
                 {loadingRepos
-                  ? "Loading repositories…"
-                  : `No open issues found for ${selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "the selected repository"}.`}
+                  ? "Loading…"
+                  : `No open issues found for ${contextLabel ?? "the selected source"}.`}
               </div>
             ) : (
               issues.map((issue) => (
                 <IssueCard
-                  key={issue.number}
+                  key={issue.key}
                   issue={issue}
-                  status={plans[issue.number]?.status}
-                  selected={selected === issue.number}
-                  busy={!!creating[issue.number]}
+                  status={plans[issue.key]?.status}
+                  selected={selected === issue.key}
+                  busy={!!creating[issue.key]}
                   onCreatePlan={() => createPlan(issue)}
-                  onSelect={() => setSelected(issue.number)}
+                  onSelect={() => setSelected(issue.key)}
                 />
               ))
             )}

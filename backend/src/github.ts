@@ -23,6 +23,8 @@ export async function listIssues(repo?: Partial<RepoRef>): Promise<Issue[]> {
   return res.data
     .filter((i) => !i.pull_request) // exclude PRs (the issues API returns both)
     .map((i) => ({
+      source: "github" as const,
+      key: String(i.number),
       number: i.number,
       title: i.title,
       body: i.body ?? null,
@@ -69,6 +71,8 @@ export async function getIssue(number: number, repo?: Partial<RepoRef>): Promise
     issue_number: number,
   });
   return {
+    source: "github",
+    key: String(i.number),
     number: i.number,
     title: i.title,
     body: i.body ?? null,

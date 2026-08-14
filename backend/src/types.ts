@@ -9,19 +9,46 @@ export type PlanStatus =
 export type JobType = "plan" | "execute";
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
+export type IssueSource = "github" | "jira";
+
 export interface Issue {
-  number: number;
+  /** Provider the issue was pulled from. */
+  source: IssueSource;
+  /** Stable identity: GitHub issue number as a string, or JIRA key ("PROJ-12"). */
+  key: string;
+  /** GitHub issue number; null for JIRA issues. */
+  number: number | null;
   title: string;
   body: string | null;
   state: string;
   url: string;
   labels: string[];
+  /** JIRA issue type (e.g. "Story", "Bug"); null for GitHub. */
+  issueType?: string | null;
+  /** JIRA status name (e.g. "In Progress"); null for GitHub. */
+  status?: string | null;
 }
 
 export interface RepoRef {
   owner: string;
   name: string;
   base: string;
+}
+
+/** Maps a JIRA project to the GitHub repo used for planning + execution. */
+export interface JiraProjectMapping {
+  id: number;
+  projectKey: string;
+  projectName: string;
+  repoOwner: string;
+  repoName: string;
+  repoBase: string;
+}
+
+/** A selectable JIRA project. */
+export interface JiraProject {
+  key: string;
+  name: string;
 }
 
 export interface Usage {
