@@ -215,7 +215,7 @@ export function scheduleExecuteJob(
 export async function refreshExecution(planId: number): Promise<void> {
   const pr = db
     .prepare(
-      `SELECT pr.id, pr.session_ref, pr.pr_number, pr.review_state, p.repo_owner, p.repo_name, p.repo_base, p.issue_number
+      `SELECT pr.id, pr.session_ref, pr.pr_number, pr.review_state, pr.agent_state, p.status AS plan_status, p.repo_owner, p.repo_name, p.repo_base, p.issue_number
        FROM prs pr
        JOIN plans p ON p.id = pr.plan_id
        WHERE pr.plan_id=?
@@ -227,6 +227,8 @@ export async function refreshExecution(planId: number): Promise<void> {
         session_ref: string | null;
         pr_number: number | null;
         review_state: string | null;
+        agent_state: string | null;
+        plan_status: string | null;
         repo_owner: string;
         repo_name: string;
         repo_base: string | null;
@@ -235,10 +237,19 @@ export async function refreshExecution(planId: number): Promise<void> {
     | undefined;
   if (!pr) return;
 
+  // Nothing left to poll once the plan is terminal. Without this guard the
+  // dashboard pollers keep re-running the full GitHub sequence (agent-task
+  // view + merged check + close-issue) forever, hammering the API.
+  if (pr.plan_status === "completed" || pr.plan_status === "failed" || pr.agent_state === "merged") {
+    return;
+  }
+
   try {
     let prNumber = pr.pr_number ?? null;
 
-    if (pr.session_ref) {
+    // Only ask the cloud agent for the draft PR while we don't have one yet.
+    // Once a PR exists we just need to watch for it being merged.
+    if (pr.session_ref && prNumber == null) {
       const { stdout } = await run(
        "gh",
        ["agent-task", "view", pr.session_ref, "--repo", `${pr.repo_owner}/${pr.repo_name}`],

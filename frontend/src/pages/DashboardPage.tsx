@@ -164,7 +164,7 @@ export default function DashboardPage({ source, setSource }: Props) {
       } catch {
         /* keep polling */
       }
-    }, 15000);
+    }, 30000);
   }, []);
 
   // One-time load: sources, repos, and JIRA mappings.
