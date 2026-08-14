@@ -12,13 +12,16 @@ function normalizeRepo(repo?: Partial<RepoRef>): RepoRef {
   };
 }
 
-export async function listIssues(repo?: Partial<RepoRef>): Promise<Issue[]> {
+export async function listIssues(
+  repo?: Partial<RepoRef>,
+  state: "open" | "closed" | "all" = "all",
+): Promise<Issue[]> {
   const target = normalizeRepo(repo);
   const res = await octokit.issues.listForRepo({
     owner: target.owner,
     repo: target.name,
-    state: "open",
-    per_page: 50,
+    state,
+    per_page: 100,
   });
   return res.data
     .filter((i) => !i.pull_request) // exclude PRs (the issues API returns both)

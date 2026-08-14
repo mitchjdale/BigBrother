@@ -40,6 +40,7 @@ export default function DashboardPage() {
   const [plans, setPlans] = useState<Record<number, PlanRef>>({});
   const [creating, setCreating] = useState<Record<number, boolean>>({});
   const [selected, setSelected] = useState<number | null>(null);
+  const [issueTab, setIssueTab] = usePersistentState<"open" | "closed">("bb.dashboard.issueTab", "open");
   const [planningModel, setPlanningModel] = usePersistentState<string | null>(
     "bb.dashboard.planningModel",
     null,
@@ -202,6 +203,14 @@ export default function DashboardPage() {
 
   const selectedPlanId = selected != null ? plans[selected]?.planId : undefined;
   const selectedIssue = selected != null ? issues.find((i) => i.number === selected) ?? null : null;
+  const openIssues = issues.filter((issue) => issue.state !== "closed");
+  const closedIssues = issues.filter((issue) => issue.state === "closed");
+  const visibleIssues = issueTab === "open" ? openIssues : closedIssues;
+
+  useEffect(() => {
+    if (!selectedRepo) return;
+    writeCache(`bb.cache.plans:${selectedRepo.owner}/${selectedRepo.name}`, plans);
+  }, [plans, selectedRepo]);
 
   // Reflect the current repo / selected issue in the browser tab title (issue #6).
   useEffect(() => {
@@ -288,8 +297,29 @@ export default function DashboardPage() {
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(320px,420px)_1fr] overflow-hidden">
         <aside className="flex flex-col overflow-hidden border-r">
-          <div className="border-b px-4 py-2 text-sm font-medium text-muted-foreground">
-            Open issues {issues.length > 0 && `(${issues.length})`}
+          <div className="flex items-center gap-4 border-b px-4 py-2 text-sm">
+            <button
+              type="button"
+              className={`border-b-2 pb-1 font-medium ${
+                issueTab === "open"
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground"
+              }`}
+              onClick={() => setIssueTab("open")}
+            >
+              Open ({openIssues.length})
+            </button>
+            <button
+              type="button"
+              className={`border-b-2 pb-1 font-medium ${
+                issueTab === "closed"
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground"
+              }`}
+              onClick={() => setIssueTab("closed")}
+            >
+              Closed ({closedIssues.length})
+            </button>
           </div>
           <div className="flex-1 space-y-2 overflow-auto p-3">
             {loading ? (
@@ -298,14 +328,14 @@ export default function DashboardPage() {
               </div>
             ) : error ? (
               <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
-            ) : issues.length === 0 ? (
+            ) : visibleIssues.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground">
                 {loadingRepos
                   ? "Loading repositories…"
-                  : `No open issues found for ${selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "the selected repository"}.`}
+                  : `No ${issueTab} issues found for ${selectedRepo ? `${selectedRepo.owner}/${selectedRepo.name}` : "the selected repository"}.`}
               </div>
             ) : (
-              issues.map((issue) => (
+              visibleIssues.map((issue) => (
                 <IssueCard
                   key={issue.number}
                   issue={issue}
@@ -332,6 +362,18 @@ export default function DashboardPage() {
                     planId={selectedPlanId}
                     planningModel={planningModel}
                     executionModel={executionModel}
+                    onStatusChange={(status) => {
+                      if (selected == null || selectedPlanId == null) return;
+                      setPlans((prev) => ({
+                        ...prev,
+                        [selected]: {
+                          ...prev[selected],
+                          planId: selectedPlanId,
+                          status,
+                        },
+                      }));
+                      if (status === "pr_open") void loadIssues();
+                    }}
                   />
                 </div>
               ) : (
