@@ -7,7 +7,9 @@ import insigniaLogo from "@/assets/insignia-logo.png";
 
 function navClass({ isActive }: { isActive: boolean }): string {
   return `inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-    isActive ? "bg-primary text-primary-foreground" : "text-[#57606a] hover:bg-black/5 dark:text-[#8b949e] dark:hover:bg-white/10"
+    isActive
+      ? "border border-transparent bg-primary text-primary-foreground"
+      : "border border-input bg-background text-[#57606a] hover:bg-accent dark:text-[#8b949e]"
   }`;
 }
 
