@@ -406,6 +406,7 @@ export default function DashboardPage({ source, setSource }: Props) {
           <Button
             variant="outline"
             size="sm"
+            className="h-9"
             onClick={() => {
               if (source === "jira") loadMappings();
               loadIssues();

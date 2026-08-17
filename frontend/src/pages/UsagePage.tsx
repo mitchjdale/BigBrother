@@ -219,7 +219,7 @@ export default function UsagePage() {
               <option value="week">Weekly</option>
             </select>
           </label>
-          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+          <Button variant="outline" size="sm" className="h-9" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
           </Button>
         </div>
