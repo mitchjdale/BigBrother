@@ -21,7 +21,14 @@ import {
 } from "./planner.js";
 import { scheduleExecuteJob, refreshExecution, requestReviewForPlan } from "./execute.js";
 import { getUsageReport, type Granularity } from "./reports.js";
-import type { IssueSource, RepoRef } from "./types.js";
+import {
+  getActivePrompt,
+  listPromptVersions,
+  resetPromptToDefault,
+  updatePrompt,
+  validatePromptTemplate,
+} from "./prompts.js";
+import type { IssueSource, PromptType, RepoRef } from "./types.js";
 
 const httpLog = log("http");
 const app = express();
@@ -120,6 +127,10 @@ function parseSource(v: unknown): IssueSource {
   return v === "jira" ? "jira" : "github";
 }
 
+function parsePromptType(v: unknown): PromptType | null {
+  return v === "plan" || v === "execute" ? v : null;
+}
+
 /**
  * Resolve the effective repo (clone + PR target) and optional JIRA project for
  * a request. GitHub uses the selected repo directly; JIRA resolves the repo
@@ -205,6 +216,51 @@ app.delete("/mappings/:id", (req, res) => {
   const removed = deleteMapping(id);
   if (!removed) return res.status(404).json({ error: "mapping not found" });
   res.status(204).end();
+});
+
+app.get("/prompts/:type", (req, res) => {
+  const type = parsePromptType(req.params.type);
+  if (!type) return res.status(400).json({ error: "prompt type must be 'plan' or 'execute'" });
+  const prompt = getActivePrompt(type);
+  if (!prompt) return res.status(404).json({ error: "prompt not found" });
+  res.json(prompt);
+});
+
+app.get("/prompts/:type/versions", (req, res) => {
+  const type = parsePromptType(req.params.type);
+  if (!type) return res.status(400).json({ error: "prompt type must be 'plan' or 'execute'" });
+  res.json(listPromptVersions(type));
+});
+
+app.patch("/prompts/:type", (req, res) => {
+  const type = parsePromptType(req.params.type);
+  if (!type) return res.status(400).json({ error: "prompt type must be 'plan' or 'execute'" });
+  const template = typeof req.body?.template === "string" ? req.body.template.trim() : "";
+  const changeReason =
+    typeof req.body?.changeReason === "string" ? req.body.changeReason.trim() : undefined;
+  if (!template) return res.status(400).json({ error: "template is required" });
+  const validation = validatePromptTemplate(type, template);
+  if (!validation.valid) {
+    return res.status(400).json({
+      error: "template is missing required placeholders",
+      missingPlaceholders: validation.missingPlaceholders,
+    });
+  }
+  try {
+    res.json(updatePrompt(type, template, changeReason));
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post("/prompts/:type/reset", (req, res) => {
+  const type = parsePromptType(req.params.type);
+  if (!type) return res.status(400).json({ error: "prompt type must be 'plan' or 'execute'" });
+  try {
+    res.json(resetPromptToDefault(type));
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 // --- M1: list issues for the selected source (GitHub repo or JIRA project) ---

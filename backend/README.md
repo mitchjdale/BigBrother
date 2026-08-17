@@ -4,6 +4,7 @@ Node/TypeScript API + async workers behind the ticket-planning dashboard. It gen
 **read-only implementation plans** for issues (from **GitHub Issues** or **JIRA**) via the
 Copilot CLI (capturing exact token/AI-Unit cost), lets developers iterate on them, and — on
 approval — hands the plan to the Copilot cloud agent to open a **draft PR**.
+The planning and execution prompts are configurable from the UI and persisted in SQLite.
 
 Default target repo: `mitchjdale/WealthOlympics` (configurable in `.env`). The UI can
 override this per run via owner/repository dropdowns.
@@ -100,6 +101,10 @@ are stripped before those subprocesses run.
 | GET  | `/mappings` | list JIRA project → GitHub repo mappings |
 | POST | `/mappings` | create/replace a mapping (`{ projectKey, projectName, repoOwner, repoName, repoBase }`) |
 | DELETE | `/mappings/:id` | delete a mapping |
+| GET  | `/prompts/:type` | get active prompt (`type`: `plan` or `execute`) |
+| GET  | `/prompts/:type/versions` | prompt version history |
+| PATCH | `/prompts/:type` | update prompt template (`{ template, changeReason? }`) with placeholder validation |
+| POST | `/prompts/:type/reset` | reset prompt to factory default |
 | GET  | `/repos/issues` | list issues for the selected source (`?source=github&repo…&state=open\|closed` or `?source=jira&project=KEY`); closed returns only GitHub issues with plan records in this DB (M1) |
 | GET  | `/plans` | latest plan per issue + per-issue `estimatedUsd` for the ticket cost badge (dashboard hydration) (#19) |
 | GET  | `/issues/:source/:key/plan` | latest persisted plan for an issue (404 if none) |
@@ -134,6 +139,8 @@ src/
   adf-to-markdown.ts  convert JIRA ADF rich-text descriptions to Markdown
   mapping.ts   JIRA project → GitHub repo mappings (CRUD + resolve)
   issues.ts    provider-agnostic issue dispatcher (GitHub | JIRA) + repo resolution
+  prompt-templates.ts  default templates + required placeholders
+  prompts.ts   prompt CRUD/versioning/validation + template rendering
   queue.ts     p-queue — enqueue on click, run plans concurrently
   copilot.ts   clone repo + run read-only Copilot CLI plan; capture markdown + cost
   usage.ts     cost adapter — sum a planning session's tokens/AIU from ~/.copilot/session-store.db (by cwd)
@@ -153,6 +160,8 @@ src/
 | `jobs` | queued/running plan & execute jobs: `type`, `status`, `session_id`, `error`, plus per-attempt cost (`input_tokens`, `output_tokens`, `nano_aiu`, `model`, `duration_ms`). Cumulative plan cost is summed from these so failed/superseded attempts are retained (#11) |
 | `prs` | execution result: `session_ref`, `pr_number`, `url`, `branch`, `agent_state`, review status/error (`review_state`, `review_error`), `screenshot_url` |
 | `jira_project_map` | JIRA project → GitHub repo mapping (`project_key`, `project_name`, `repo_owner`, `repo_name`, `repo_base`) used to clone + open the PR for JIRA-sourced plans |
+| `prompts` | active planning/execution prompt templates (`type`, `template`, audit timestamps) |
+| `prompt_versions` | immutable prompt history (`prompt_id`, `version_no`, `template`, `change_reason`) |
 
 ## Environment variables (`.env`)
 

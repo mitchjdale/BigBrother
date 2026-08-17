@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
+import { DEFAULT_PROMPT_NAMES, DEFAULT_PROMPT_TEMPLATES } from "./prompt-templates.js";
 
 fs.mkdirSync(path.dirname(config.sqlitePath), { recursive: true });
 
@@ -65,6 +66,28 @@ CREATE TABLE IF NOT EXISTS prs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS prompts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL UNIQUE CHECK (type IN ('plan', 'execute')),
+  name TEXT NOT NULL,
+  template TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS prompt_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  prompt_id INTEGER NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+  version_no INTEGER NOT NULL,
+  template TEXT NOT NULL,
+  changed_by TEXT,
+  change_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(prompt_id, version_no)
+);
 `);
 
 // --- Migrations for existing databases ---
@@ -122,6 +145,41 @@ CREATE TABLE IF NOT EXISTS jira_project_map (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+
+function seedPrompt(type: "plan" | "execute"): void {
+  const existing = db.prepare(`SELECT id FROM prompts WHERE type=? AND is_active=1`).get(type) as
+    | { id: number }
+    | undefined;
+  if (existing) {
+    const hasVersions = db
+      .prepare(`SELECT id FROM prompt_versions WHERE prompt_id=? LIMIT 1`)
+      .get(existing.id) as { id: number } | undefined;
+    if (!hasVersions) {
+      const active = db.prepare(`SELECT template FROM prompts WHERE id=?`).get(existing.id) as
+        | { template: string }
+        | undefined;
+      if (active) {
+        db.prepare(
+          `INSERT INTO prompt_versions (prompt_id, version_no, template, change_reason) VALUES (?, 1, ?, ?)`,
+        ).run(existing.id, active.template, "Initial seeded template");
+      }
+    }
+    return;
+  }
+
+  const info = db
+    .prepare(
+      `INSERT INTO prompts (type, name, template, is_active) VALUES (?, ?, ?, 1)`,
+    )
+    .run(type, DEFAULT_PROMPT_NAMES[type], DEFAULT_PROMPT_TEMPLATES[type]);
+  const promptId = Number(info.lastInsertRowid);
+  db.prepare(
+    `INSERT INTO prompt_versions (prompt_id, version_no, template, change_reason) VALUES (?, 1, ?, ?)`,
+  ).run(promptId, DEFAULT_PROMPT_TEMPLATES[type], "Initial seeded template");
+}
+
+seedPrompt("plan");
+seedPrompt("execute");
 
 export function now(): string {
   return new Date().toISOString();

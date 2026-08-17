@@ -10,6 +10,7 @@ import { log } from "./logger.js";
 import { ghAgentEnv } from "./auth.js";
 import { closeIssueAsCompleted, isPullRequestMerged, requestCopilotReview } from "./github.js";
 import type { RepoRef } from "./types.js";
+import { defaultPromptTemplate, getActivePrompt, renderPromptTemplate } from "./prompts.js";
 
 const run = promisify(execFile);
 const execLog = log("execute");
@@ -103,7 +104,10 @@ export function scheduleExecuteJob(
     try {
       fs.writeFileSync(
         planFile,
-        `Implement the following approved plan. Open a draft pull request with the changes.\n\n${planMarkdown}`,
+        renderPromptTemplate(
+          getActivePrompt("execute")?.template ?? defaultPromptTemplate("execute"),
+          { plan_markdown: planMarkdown },
+        ),
       );
 
       const args = [

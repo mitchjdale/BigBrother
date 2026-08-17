@@ -9,6 +9,7 @@ export type PlanStatus =
 
 export type JobType = "plan" | "execute";
 export type JobStatus = "queued" | "running" | "done" | "failed";
+export type PromptType = "plan" | "execute";
 
 export type IssueSource = "github" | "jira";
 
@@ -79,5 +80,25 @@ export interface PlanVersionRow {
   nano_aiu: number;
   model: string | null;
   duration_ms: number;
+  created_at: string;
+}
+
+export interface PromptRow {
+  id: number;
+  type: PromptType;
+  name: string;
+  template: string;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromptVersionRow {
+  id: number;
+  prompt_id: number;
+  version_no: number;
+  template: string;
+  changed_by: string | null;
+  change_reason: string | null;
   created_at: string;
 }

@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, Plus, RefreshCw, Trash2, Link2 } from "lucide-react";
+import { PromptsPanel } from "@/components/PromptsPanel";
 
 const selectClass =
   "h-9 rounded-md border bg-background px-2 text-sm text-foreground disabled:opacity-50";
@@ -147,6 +148,8 @@ export default function SettingsPage({ source, setSource }: Props) {
                 </p>
               </CardContent>
             </Card>
+
+            <PromptsPanel />
 
             {source === "jira" &&
               (jiraConfigured === false ? (
