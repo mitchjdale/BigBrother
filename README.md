@@ -1,6 +1,6 @@
 # BigBrother
 
-> Hackathon 2026 · Team TE-18 (Fernando)
+> Hackathon 2026 · Team T-18 (Fernando)
 
 <p align="center">
   <img src="BigBrother.png" alt="BigBrother" width="480" />
