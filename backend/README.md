@@ -37,14 +37,11 @@ POST /plans/:id/execute ──▶ execute worker:
 Planning is **read-only**: the `write`, `git commit`, `git push`, `rm`, `mv` tools are
 denied, so the agent physically cannot modify the repo — it only produces a plan.
 
-Cost is captured by matching the CLI session on its `cwd` (the unique clone dir) in the
-Copilot local session store, then summing `assistant_usage_events` (input/output tokens,
-`total_nano_aiu`). 1 AIU = 1e9 nano_aiu; set `USD_PER_AIU` for a dollar figure.
-
-Only the **planning** phase is tracked: planning cost comes from the local CLI session
-above. The implementation phase runs on the Copilot cloud coding agent (`gh agent-task`),
-whose token usage is not available in the local session store, so it cannot be captured or
-reported. The `/usage` report and the usage page therefore cover planning usage only.
+Planning cost is captured by matching the CLI session on its `cwd` (the unique clone dir)
+in the Copilot local session store, then summing `assistant_usage_events` (input/output
+tokens, `total_nano_aiu`). Implementation cost is captured best-effort from
+`gh agent-task view --log` using the execution `session_ref`. `1 AIU = 1e9 nano_aiu`; set
+`USD_PER_AIU` for a dollar figure.
 
 Cost is also translated to a rough **dollar estimate** (#19). `pricing.ts` holds an
 approximate USD-per-1M-token price list keyed by model (overridable via `MODEL_PRICING`),
@@ -111,7 +108,7 @@ are stripped before those subprocesses run.
 | POST | `/plans/:id/execute` | approve → Copilot cloud agent → draft PR (M4) |
 | POST | `/plans/:id/refresh-execution` | re-poll agent task for the draft PR / state (M4) |
 | POST | `/plans/:id/review` | request (or re-request) Copilot code review on the latest draft PR for this plan |
-| GET  | `/usage` | aggregated planning token/AIU usage, with time series + per-repo breakdown (optional `repoOwner`/`repoName`/`from`/`to`/`granularity`) |
+| GET  | `/usage` | aggregated planning + execution token/AIU usage, with time series + per-repo breakdown (optional `repoOwner`/`repoName`/`from`/`to`/`granularity`) |
 
 `/plans/:id/review` (and the automatic review request during execute/refresh) is best-effort: it requires
 repo permission to request PR reviewers plus Copilot code review enabled for the repo/org.

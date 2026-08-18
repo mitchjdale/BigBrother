@@ -1,7 +1,12 @@
 import Database from "better-sqlite3";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
+import { promisify } from "node:util";
 import { config } from "./config.js";
-import type { Usage } from "./types.js";
+import { ghAgentEnv } from "./auth.js";
+import type { Usage, RepoRef } from "./types.js";
+
+const run = promisify(execFile);
 
 const EMPTY: Usage = {
   inputTokens: 0,
@@ -16,6 +21,65 @@ const EMPTY: Usage = {
   model: null,
   turns: 0,
 };
+
+function parseIntToken(text: string, re: RegExp): number {
+  const raw = text.match(re)?.[1];
+  if (!raw) return 0;
+  const n = Number(raw.replaceAll(",", ""));
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
+}
+
+function parseAiu(text: string): number {
+  const matched =
+    text.match(/ai credit usage[^0-9]*([0-9][0-9,]*(?:\.[0-9]+)?)/i)?.[1] ??
+    text.match(/\baiu\b[^0-9]*([0-9][0-9,]*(?:\.[0-9]+)?)/i)?.[1] ??
+    null;
+  if (!matched) return 0;
+  const aiu = Number(matched.replaceAll(",", ""));
+  return Number.isFinite(aiu) ? aiu : 0;
+}
+
+function parseAgentTaskUsageText(text: string): Usage {
+  const inputTokens = parseIntToken(text, /input[_\s-]*tokens?[^0-9]*([0-9][0-9,]*)/i);
+  const outputTokens = parseIntToken(text, /output[_\s-]*tokens?[^0-9]*([0-9][0-9,]*)/i);
+  const durationMs = parseIntToken(text, /duration[^0-9]*([0-9][0-9,]*)\s*ms/i);
+  const model = text.match(/model[^A-Za-z0-9._-]*([A-Za-z0-9._-]+)/i)?.[1] ?? null;
+  const aiu = parseAiu(text);
+  const nanoAiu = Math.round(aiu * 1e9);
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+    nanoAiu,
+    aiu,
+    usd: config.usdPerAiu > 0 ? aiu * config.usdPerAiu : null,
+    durationMs,
+    model,
+    turns: 0,
+  };
+}
+
+/**
+ * Fetch implementation usage for a cloud `gh agent-task` run.
+ *
+ * The cloud agent does not write usage rows to the local Copilot session store,
+ * so we query `gh agent-task view --log` and parse any reported usage data.
+ */
+export async function captureAgentTaskUsage(sessionId: string, repo: RepoRef): Promise<Usage> {
+  if (!sessionId) return EMPTY;
+  try {
+    const { stdout, stderr } = await run(
+      "gh",
+      ["agent-task", "view", sessionId, "--repo", `${repo.owner}/${repo.name}`, "--log"],
+      { env: ghAgentEnv(), maxBuffer: 32 * 1024 * 1024 },
+    );
+    return parseAgentTaskUsageText(`${stdout}\n${stderr}`);
+  } catch {
+    return EMPTY;
+  }
+}
 
 /**
  * Find the Copilot CLI session that ran in `cwd` and sum its per-turn usage.

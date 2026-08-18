@@ -151,7 +151,7 @@ export default function UsagePage() {
         <div>
           <h2 className="text-lg font-semibold">Token usage</h2>
           <p className="text-sm text-muted-foreground">
-            Planning token and cost usage across all plans.
+            Planning and implementation token/cost usage across all plans.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -241,7 +241,7 @@ export default function UsagePage() {
             title="Total AIU"
             icon={<Zap className="h-4 w-4" />}
             value={s ? s.aiu.toFixed(2) : "—"}
-            sub={s ? `${fmtInt(s.attempts)} plan run(s)` : undefined}
+            sub={s ? `${fmtInt(s.attempts)} job run(s)` : undefined}
           />
           <SummaryCard
             title="Estimated cost"

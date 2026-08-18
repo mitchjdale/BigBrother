@@ -10,6 +10,7 @@ import { log } from "./logger.js";
 import { ghAgentEnv } from "./auth.js";
 import { closeIssueAsCompleted, isPullRequestMerged, requestCopilotReview } from "./github.js";
 import type { RepoRef } from "./types.js";
+import { captureAgentTaskUsage } from "./usage.js";
 
 const run = promisify(execFile);
 const execLog = log("execute");
@@ -147,15 +148,31 @@ export function scheduleExecuteJob(
         jobLog,
       );
 
-      db.prepare(`UPDATE jobs SET status='done', session_id=?, updated_at=datetime('now') WHERE id=?`).run(
+      const repoRef = { owner: plan.repo_owner, name: plan.repo_name, base: plan.repo_base || config.repo.base };
+      const usage = parsed.sessionRef ? await captureAgentTaskUsage(parsed.sessionRef, repoRef) : null;
+      db.prepare(
+        `UPDATE jobs
+         SET status='done', session_id=?, input_tokens=?, output_tokens=?, nano_aiu=?, model=?, duration_ms=?, updated_at=datetime('now')
+         WHERE id=?`,
+      ).run(
         parsed.sessionRef,
+        usage?.inputTokens ?? 0,
+        usage?.outputTokens ?? 0,
+        usage?.nanoAiu ?? 0,
+        usage?.model ?? null,
+        usage?.durationMs ?? 0,
         jobId,
       );
       db.prepare(
         `UPDATE plans SET status=?, error=NULL, updated_at=datetime('now') WHERE id=?`,
       ).run(parsed.prUrl ? "pr_open" : "executing", planId);
       jobLog.info(
-        { sessionRef: parsed.sessionRef, prNumber: parsed.prNumber, prUrl: parsed.prUrl },
+        {
+          sessionRef: parsed.sessionRef,
+          prNumber: parsed.prNumber,
+          prUrl: parsed.prUrl,
+          executionAiu: usage?.aiu ?? 0,
+        },
         parsed.prUrl ? "execute job opened draft PR" : "execute job dispatched (PR pending)",
       );
     } catch (err) {
@@ -212,6 +229,40 @@ export async function refreshExecution(planId: number): Promise<void> {
   }
 
   try {
+    if (pr.session_ref) {
+      const usageJob = db
+        .prepare(
+          `SELECT id, status, input_tokens, output_tokens, nano_aiu
+           FROM jobs
+           WHERE plan_id=? AND type='execute'
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .get(planId) as
+        | { id: number; status: string; input_tokens: number; output_tokens: number; nano_aiu: number }
+        | undefined;
+      if (
+        usageJob &&
+        usageJob.status === "done" &&
+        usageJob.input_tokens === 0 &&
+        usageJob.output_tokens === 0 &&
+        usageJob.nano_aiu === 0
+      ) {
+        const usage = await captureAgentTaskUsage(pr.session_ref, {
+          owner: pr.repo_owner,
+          name: pr.repo_name,
+          base: pr.repo_base || config.repo.base,
+        });
+        if (usage.inputTokens > 0 || usage.outputTokens > 0 || usage.nanoAiu > 0) {
+          db.prepare(
+            `UPDATE jobs
+             SET input_tokens=?, output_tokens=?, nano_aiu=?, model=?, duration_ms=?, updated_at=datetime('now')
+             WHERE id=?`,
+          ).run(usage.inputTokens, usage.outputTokens, usage.nanoAiu, usage.model, usage.durationMs, usageJob.id);
+          execLog.info({ planId, jobId: usageJob.id, aiu: usage.aiu }, "captured delayed execute usage");
+        }
+      }
+    }
+
     let prNumber = pr.pr_number ?? null;
 
     // Only ask the cloud agent for the draft PR while we don't have one yet.

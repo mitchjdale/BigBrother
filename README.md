@@ -41,11 +41,10 @@ Two distinct agent phases, on purpose:
 | **Plan** | Copilot **CLI** headless (`copilot -p … --deny-tool write`) in a fresh clone | `write` / `git commit` / `git push` denied → **cannot modify code** | plan markdown + exact token/AIU cost |
 | **Execute** | Copilot **cloud agent** (`gh agent-task create -F plan.md`) | writes code on a branch | **draft pull request** |
 
-**Cost tracking** (the business case): the Copilot CLI records per-turn usage
-(`input_tokens`, `output_tokens`, `total_nano_aiu`) in its local session store
-(`~/.copilot/session-store.db`). Each plan job clones into a unique directory, so the
-worker matches the run's session by `cwd` and sums its cost. `1 AIU = 1e9 nano_aiu`; set
-`USD_PER_AIU` in the backend env to convert to dollars.
+**Cost tracking** (the business case): planning usage is read from the Copilot CLI local
+session store (`~/.copilot/session-store.db`) by matching the plan run `cwd`. Execution
+usage is captured best-effort from `gh agent-task view --log` via the task `session_ref`.
+`1 AIU = 1e9 nano_aiu`; set `USD_PER_AIU` in the backend env to convert to dollars.
 
 ## Repository layout
 
