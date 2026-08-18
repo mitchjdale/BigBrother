@@ -1,0 +1,44 @@
+Hackathon 2026 - BigBrother
+
+Problem:
+- [ ] 	Current pain points
+    - [ ] Having to create plans one at a time and iterate sequentially
+    - [ ] Not having an estimate of price (a developer doesn’t have direct feedback of the cost of their AI usage currently)
+    - [ ] Time currently spent summarising tickets, understanding the issue, identifying changes but this encapsulates this whole process
+    - [ ] Requirements are not all written equal, as a developer you may understand one form better than another and by using AI we can leverage the fact it can process different information forms much more readily, reducing cognitive load on switching tasks for developers
+    - [ ] Can be used to help analysts identify possible requirements for a given feature or issue with code context
+    - [ ] Why it is called BigBrother
+
+Tools:
+Github, Github Copilot, Copilot CLI, Github Agents, Github CLI, JIRA
+Tech: React, Node, Tailwind, REST API, sqlite, GitHub/Jira Tokens for integration
+
+Solution:
+
+- [ ] Specify the project you are working on
+- [ ] Pull issues from Jira/Github (relevant to a project)
+- [ ] List issues on web dashboard
+- [ ] Create a plan based on the selected issue, this is a plan only and cannot modify any code
+    - [ ] This is important because not every plan is correct - this essentially speeds up ideas and solutions for tickets on the go
+    - [ ] Allow iterating on the plan until the developer is satisfied (exactly what you would do locally)
+- [ ] Once satisfied, accept and execute the plan
+- [ ] Copilot Agent creates a branch and pull request and is fed the plan to perform implementation
+- [ ] Copilot Review bot is triggered to automatically perform an external review on the implementation
+- [ ] Developer reviews the Pull Request and provides commentary or approval as necessary.
+- [ ] AI Usage is tracked for billing purposes, planning and implementation separately.
+Having plans stored in a database means that we can audit and review previously done issues and easily understand why the implementation was done a certain way. This expands well beyond a commit message as you get the “internal” thoughts of the idea being created
+
+Impact: 
+- [ ] Can be used by any tech team that has a managed code base in GitHub 
+- [ ] All developers can benefit from this parallel workflow
+- [ ] Developer discretion is still provided so we don’t run into the problem of AI slop
+- [ ] Cost reduction & Increase productivity 
+    - [ ] It does look like we are spending more by using AI more here, however this process is already performed by developers on a per issue basis, this just helps automate and concurrently work through issues
+- [ ] AI enablement -> Developer efficiency 
+
+Next Steps:
+- [ ] Expand the workflow to include the requirement gathering and even perform automated testing
+- [ ] Customise per project the AI prompts to better tailor for specific needs
+- [ ] Host internally so all issues can have their plans and implementation stored which allows anyone to revisit the “WHY” something was done.
+- [ ] Improving the pipeline to be more scalable for all developers on a project (once we move off localhost)
+- [ ] Track implementation costs to get a full holistic picture of the total cost per issue
