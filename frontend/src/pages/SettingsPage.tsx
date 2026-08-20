@@ -106,7 +106,7 @@ export default function SettingsPage({ source, setSource }: Props) {
             Choose the issue source and, for JIRA, map projects to GitHub repositories.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={load}>
+        <Button variant="outline" size="sm" className="h-9" onClick={load}>
           <RefreshCw className="h-4 w-4" /> Refresh
         </Button>
       </header>
