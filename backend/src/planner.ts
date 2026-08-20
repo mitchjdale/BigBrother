@@ -336,7 +336,7 @@ export function getPlanView(planId: number) {
   const attempts = db
     .prepare(
       `SELECT input_tokens, output_tokens, nano_aiu, model, status
-       FROM jobs WHERE plan_id=? AND type='plan'`,
+       FROM jobs WHERE plan_id=? AND type IN ('plan','execute')`,
     )
     .all(planId) as {
     input_tokens: number;

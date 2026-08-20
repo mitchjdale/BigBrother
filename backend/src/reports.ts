@@ -12,7 +12,7 @@ export interface UsageQuery {
   granularity?: Granularity;
 }
 
-/** Token/AIU/cost totals for a set of planning jobs. */
+/** Token/AIU/cost totals for a set of planning+execution jobs. */
 export interface UsageTotals {
   inputTokens: number;
   outputTokens: number;
@@ -64,7 +64,7 @@ interface Sums {
 
 const EST_USD = sqlEstimatedUsd("j.input_tokens", "j.output_tokens", "j.model");
 
-/** SQL fragment aggregating token/AIU/attempt sums for planning jobs. */
+/** SQL fragment aggregating token/AIU/attempt sums for planning+execution jobs. */
 const SUMS = `
   COALESCE(SUM(j.input_tokens),0)                         AS input,
   COALESCE(SUM(j.output_tokens),0)                        AS output,
@@ -105,9 +105,7 @@ interface Filters {
 }
 
 function buildFilters(q: UsageQuery): Filters {
-  // Only planning (`plan`) jobs are captured; implementation runs on the
-  // Copilot cloud agent whose usage is not available locally.
-  const clauses = ["j.type = 'plan'"];
+  const clauses = ["j.type IN ('plan','execute')"];
   const params: unknown[] = [];
 
   if (q.repoOwner && q.repoName) {
@@ -127,7 +125,7 @@ function buildFilters(q: UsageQuery): Filters {
 }
 
 /**
- * Aggregate planning-job token/AIU usage into time buckets + summary +
+ * Aggregate job token/AIU usage into time buckets + summary +
  * per-repo totals.
  */
 export function getUsageReport(q: UsageQuery): UsageReport {
