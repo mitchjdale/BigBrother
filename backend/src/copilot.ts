@@ -7,6 +7,7 @@ import { cloneUrl, copilotEnv } from "./auth.js";
 import { log } from "./logger.js";
 import type { Issue, RepoRef, Usage } from "./types.js";
 import { captureUsageByCwd } from "./usage.js";
+import { defaultPromptTemplate, getActivePrompt, renderPromptTemplate } from "./prompts.js";
 
 const run = promisify(execFile);
 const copilotLog = log("copilot");
@@ -21,29 +22,23 @@ const READ_ONLY_DENY = [
 ];
 
 function planPrompt(issue: Issue, feedback?: string, previousPlan?: string): string {
-  const ref = issue.source === "github" ? `#${issue.number}` : issue.key;
-  const base = `You are a senior engineer. Research THIS repository (it is checked out in the current directory) and produce a detailed, actionable implementation plan for the ${issue.source === "jira" ? "JIRA" : "GitHub"} issue below.
+  const values = {
+    issue_ref: issue.source === "github" ? `#${issue.number}` : issue.key,
+    issue_source: issue.source === "jira" ? "JIRA" : "GitHub",
+    issue_title: issue.title,
+    issue_body: issue.body ?? "(no description)",
+    feedback: feedback?.trim() || "(none)",
+    previous_plan: previousPlan?.trim() || "(none)",
+  };
 
-Rules:
-- Do NOT modify any files. Output ONLY the plan.
-- Respond in Markdown. Include: Summary, Affected files/areas, Step-by-step tasks, Risks/edge cases, and a Testing strategy.
-
-Issue ${ref}: ${issue.title}
-
-${issue.body ?? "(no description)"}`;
-
-  if (feedback && previousPlan) {
-    return `${base}
-
-A previous plan was generated (below). The developer gave this feedback — revise the plan accordingly and output the full revised plan:
-
-## Developer feedback
-${feedback}
-
-## Previous plan
-${previousPlan}`;
+  const fallback = renderPromptTemplate(defaultPromptTemplate("plan"), values);
+  try {
+    const active = getActivePrompt("plan");
+    if (!active) return fallback;
+    return renderPromptTemplate(active.template, values);
+  } catch {
+    return fallback;
   }
-  return base;
 }
 
 export interface PlanResult {

@@ -28,6 +28,8 @@ The dev server proxies `/api/*` to `http://localhost:8787` (see `vite.config.ts`
   - Edit the plan inline -> saved as a new user_edited version.
   - Regenerate with feedback -> agent revises the plan (new version).
   - Approve & execute -> backend fires the Copilot cloud agent -> draft PR link.
+- Settings page: choose issue source, manage JIRA project mappings, and edit/reset the
+  planning + execution prompt templates (with version history).
 
 ## Structure
 - src/api/client.ts - typed fetch client for the backend.

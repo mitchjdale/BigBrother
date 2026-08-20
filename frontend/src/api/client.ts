@@ -34,6 +34,29 @@ export interface JiraProjectMapping {
   repoBase: string;
 }
 
+export type PromptType = "plan" | "execute";
+
+export interface Prompt {
+  id: number;
+  type: PromptType;
+  name: string;
+  template: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PromptVersion {
+  id: number;
+  promptId: number;
+  type: PromptType;
+  versionNo: number;
+  template: string;
+  changedBy: string | null;
+  changeReason: string | null;
+  createdAt: string;
+}
+
 export interface Sources {
   github: boolean;
   jira: boolean;
@@ -202,6 +225,21 @@ export const api = {
     fetch(`${BASE}/mappings/${id}`, { method: "DELETE" }).then((r) => {
       if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
     }),
+
+  getPrompt: (type: PromptType) => fetch(`${BASE}/prompts/${type}`).then(json<Prompt>),
+
+  updatePrompt: (type: PromptType, template: string, changeReason?: string) =>
+    fetch(`${BASE}/prompts/${type}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ template, changeReason }),
+    }).then(json<Prompt>),
+
+  getPromptVersions: (type: PromptType) =>
+    fetch(`${BASE}/prompts/${type}/versions`).then(json<PromptVersion[]>),
+
+  resetPrompt: (type: PromptType) =>
+    fetch(`${BASE}/prompts/${type}/reset`, { method: "POST" }).then(json<Prompt>),
 
   listIssues: (ctx: IssueContext, state: "open" | "closed" = "open") =>
     fetch(`${BASE}/repos/issues${contextQuery(ctx)}&state=${state}`).then(json<Issue[]>),
